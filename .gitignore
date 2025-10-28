@@ -1,0 +1,30 @@
+# Largely lifted from dox-pytest 11/28/23. We probably ought to go through and
+# audit this list
+*.pyc
+*.pyo
+*.tar.gz
+*.egg-info/
+build/
+.idea
+*.swp
+*.swo
+*.zwc
+*.log
+*~
+.cache
+.pytest_cache
+.eggs
+.python-version
+Pipfile.lock
+**/**/.DS_Store
+.env
+dist/
+.vscode/
+.envrc
+Session.vim
+.coverage
+coverage.xml
+test-results/
+
+# Files to include regardless of exclusion rules
+!**/.gitkeep
