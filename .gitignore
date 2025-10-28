@@ -25,6 +25,7 @@ Session.vim
 .coverage
 coverage.xml
 test-results/
+*.ai/
 
 # Files to include regardless of exclusion rules
 !**/.gitkeep
