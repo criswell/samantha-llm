@@ -37,3 +37,8 @@ help you retain a record of your completed tasks and projects over time.
 
 Please see the `main.md` file in the `work-experience/` directory for more
 information on that directory and how to organize your completed tasks.
+
+It is your responsibility to ensure that your current tasks and projects are
+accurate and up to date, and to move completed taskss to the `work-experience/`
+directory. This ensures that the current tasks are clean and uncluttered with
+completed items.
