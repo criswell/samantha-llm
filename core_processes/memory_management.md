@@ -22,9 +22,35 @@ date: YYYY-MM-DD          # Date memory was created
 updated: YYYY-MM-DD       # Last update date (optional)
 topics: [tag1, tag2]      # Relevant topics/tags for categorization
 importance: low|medium|high  # Subjective importance rating
-type: interaction|learning|decision|technical  # Memory type
+type: interaction|learning|decision|technical|quick-reference  # Memory type
+reference_count: 0        # Number of times referenced across sessions (optional)
+project: project-name     # Associated project (optional, e.g., "pipefitter", "mortar")
 ---
 ```
+
+### Memory Types Explained
+
+- **interaction**: Records of significant conversations or user interactions
+- **learning**: New knowledge or discoveries from research/experimentation
+- **decision**: Important decisions made about architecture, approach, or direction
+- **technical**: Technical details, configurations, or implementation specifics
+- **quick-reference**: Workflows, checklists, or "always do this" procedures
+
+Example memory file:
+```markdown
+---
+date: 2025-01-28
+topics: [circleci, pipefitter, orbs]
+importance: medium
+type: technical
+project: pipefitter
+---
+
+# CircleCI Orb Namespace Research
+
+Discovered that CircleCI orbs can come from multiple namespaces...
+```
+
 
 Example memory file:
 ```markdown
@@ -181,3 +207,70 @@ Long-term memory should rarely be deleted, but can be:
 - Consolidated when multiple memories cover the same topic
 - Archived if technology/practices become obsolete
 - Refined to remove outdated information while preserving core lessons
+
+# Memory Importance Escalation
+
+As you work across multiple sessions, you should track how often you reference specific memories. This helps identify which memories are truly important and should be elevated or transferred to long-term storage.
+
+## Reference Counting
+
+When you reference a memory during a session:
+1. Increment the `reference_count` field in the YAML frontmatter
+2. Update the `updated` field to the current date
+3. Add a brief note about why it was referenced (optional)
+
+Example:
+```yaml
+---
+date: 2025-01-29
+updated: 2025-02-15
+topics: [pipefitter, testing, ci]
+importance: high
+type: quick-reference
+reference_count: 5
+project: pipefitter
+---
+```
+
+## Automatic Importance Escalation
+
+Apply these heuristics when updating memories:
+
+- **3+ references**: Consider upgrading to `importance: high` if not already
+- **5+ references**: Strong candidate for long-term memory transfer
+- **10+ references**: Definitely transfer to long-term memory or add to critical workflows
+
+## Quick-Reference Memories
+
+Memories with `type: quick-reference` are special:
+- They contain workflows, checklists, or procedures
+- They should be surfaced during bootstrap when relevant
+- They often belong in `.ai-cerebrum/core_processes/critical_workflows.md`
+- High-importance quick-references should be duplicated in critical workflows
+
+When you create a `quick-reference` memory:
+1. Consider if it should also be added to `critical_workflows.md`
+2. Tag it with the relevant project name
+3. Set importance based on impact (prevents bugs = high, nice-to-have = low)
+
+# Project-Specific Memory Tagging
+
+To enable project-specific memory surfacing during bootstrap, always tag memories with the relevant project name using the `project` field:
+
+```yaml
+project: pipefitter  # For pipefitter-related memories
+project: mortar      # For mortar-related memories
+project: data-platform  # For general data platform work
+```
+
+This allows future sessions to automatically surface relevant memories when working in specific project directories.
+
+## Surfacing Project Memories During Bootstrap
+
+When initializing in a project directory:
+1. Determine the current project from the working directory
+2. Scan short-term memory index for entries with matching `project` field
+3. Surface high-importance project-specific memories first
+4. Check `critical_workflows.md` for project-specific workflows
+
+This ensures you always have relevant context when starting work on a project.

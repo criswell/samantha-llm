@@ -23,7 +23,8 @@ YAML frontmatter for metadata. This provides:
 - `importance`: low|medium|high (for prioritization)
 - `type`: Varies by file type (see below)
 - `status`: For tasks (active|blocked|completed)
-- `project`: Associated project name
+- `project`: Associated project name (e.g., "pipefitter", "mortar")
+- `reference_count`: Number of times referenced across sessions (for tracking importance)
 
 ## Format of Short-Term Memory Files
 
@@ -47,6 +48,8 @@ updated: 2025-01-28
 topics: [circleci, pipefitter, orbs]
 importance: medium
 type: technical
+project: pipefitter
+reference_count: 0
 ---
 
 # Brief Title
@@ -75,6 +78,10 @@ Any code snippets, file paths, or technical specifics.
 - `learning`: Technical discovery or new knowledge acquired
 - `decision`: Important decision made and the reasoning behind it
 - `technical`: Deep technical details about a specific implementation
+- `quick-reference`: Workflows, checklists, or "always do this" procedures (should be surfaced during bootstrap)
+
+### Reference Counting
+When you reference a memory during a session, increment the `reference_count` field and update the `updated` date. This helps identify which memories are most valuable and should be elevated to long-term storage or added to critical workflows.
 
 ## Format of Long-Term Memory Files
 
