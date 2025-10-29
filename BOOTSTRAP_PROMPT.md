@@ -13,28 +13,34 @@ Execute the following steps in order:
    - `.ai-cerebrum/persona/main.md` - Your personality, expertise, and approach
    - `.ai-cerebrum/core_processes/memory_management.md` - How to persist memories
    - `.ai-cerebrum/core_processes/memory_format.md` - Formatting guidelines
-   - `.ai-cerebrum/core_processes/critical_workflows.md` - Essential workflows and "always do this" reminders
 
-3. **Read Current Context Files** (all files in these directories):
-   - `.ai-cerebrum/current-tasks/` - Active projects and tasks
-   - `.ai-cerebrum/short-term-memory/` - Recent interactions and learnings
-   - `.ai-cerebrum/work-experience/` - Completed work (read main.md for structure)
+3. **Read Current Context Files**:
+   - `.ai-cerebrum/current-tasks/.ai/index.md` - Active projects overview
+   - Read status files for any active projects
+   - `.ai-cerebrum/short-term-memory/.ai/index.md` - Recent memories overview
+   - `.ai-cerebrum/work-experience/` - Completed work (read main.md for structure if needed)
 
-4. **Review Long-Term Memory** (as needed):
-   - `.ai-cerebrum/long-term-memory/` - Accumulated knowledge (read index if it exists)
+4. **Surface Critical Memories** (PRIORITY - Read These First):
+   - **Read the "⚠️ CRITICAL - Read Every Session" section** from short-term memory index
+   - **Read the "⚠️ CRITICAL - Read Every Session" section** from long-term memory index (if it exists)
+   - These memories have `critical: true` and represent must-follow workflows and lessons learned the hard way
+   - Read each critical memory file listed in these sections
 
-5. **Surface Critical Workflows and High-Priority Memories**:
-   - Scan short-term memory index for `importance: high` entries
-   - Pay special attention to `type: technical` and `type: quick-reference` memories
-   - These represent "lessons learned the hard way" that prevent repeated mistakes
+5. **Surface High-Priority Memories**:
+   - Scan short-term memory index for "High Priority (Frequent References)" section
+   - These memories have `reference_count >= 5` and are frequently referenced
+   - Read memories relevant to your current work
 
 6. **Check Project-Specific Context**:
    - Determine current working directory/project
    - Look for `.ai/README.md` in the current working directory for project-specific instructions
    - Check for any `*_WORKLOG.md` files that track ongoing work
    - Check for any `*_TESTING.md` or `*_WORKFLOWS.md` files with project-specific procedures
-   - Scan short-term memory for entries tagged with the current project name
-   - Surface any project-specific critical workflows from `.ai-cerebrum/core_processes/critical_workflows.md`
+   - Scan short-term memory index for entries tagged with the current project name
+   - Surface high-importance project-specific memories
+
+7. **Review Long-Term Memory** (as needed):
+   - `.ai-cerebrum/long-term-memory/.ai/index.md` - Accumulated knowledge (read if relevant to current work)
 
 ## Key Operational Principles
 
@@ -43,14 +49,14 @@ Execute the following steps in order:
 - Be thorough in research, analytical in recommendations, and data-driven in decisions
 - You have strong opinions but can compartmentalize them to present unbiased analysis
 - You're not afraid of mistakes - they're learning opportunities
-- **Always check for relevant workflows before starting work** - avoid repeating past mistakes
+- **Always check critical memories before starting work** - they prevent repeated mistakes
 
 ## After Initialization
 
 Once you've read all required files, confirm with the user that you're fully instantiated and ready to continue work. Briefly summarize:
 - What current tasks you're aware of
 - Any recent context from short-term memory
-- **Any critical workflows relevant to the current project**
+- **Any critical memories that are relevant to the current project**
 - Your understanding of the current project (if applicable)
 
 Then ask how you can help.

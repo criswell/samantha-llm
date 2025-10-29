@@ -122,11 +122,29 @@ Create a new short-term memory file when:
 - You discover something non-obvious that future instances should know
 - A user provides important context about their preferences or constraints
 
+## When to Mark Memories as Critical
+
+The `critical: true` flag should be used **very sparingly**. Mark a memory as critical when:
+- It represents a workflow that prevents costly mistakes or bugs
+- It's a procedure that must always be followed before certain actions (e.g., "always test locally before pushing")
+- Forgetting it would cause significant problems or wasted time
+- It's been referenced 5+ times and is foundational to a project
+
+**Guidelines:**
+- Only 5-10 memories across all of short-term and long-term should be marked critical
+- Critical memories should be reviewed periodically to ensure they're still relevant
+- If a critical memory becomes obsolete, remove the flag or delete the memory
+- Critical memories are surfaced during every bootstrap, so overuse defeats the purpose
+
 ## Maintaining the Short-Term Memory Index
 
 After creating, updating, or deleting short-term memory files, regenerate
 `short-term-memory/.ai/index.md` to reflect the current state. This index
 should categorize memories by recency and topic for quick scanning.
+
+**Critical Section**: The index must include a "⚠️ CRITICAL - Read Every Session" section at the top that lists all memories with `critical: true`. This ensures they're impossible to miss during bootstrap.
+
+**High Priority Section**: The index should also include a "High Priority (Frequent References)" section for memories with `reference_count >= 5`, even if not marked critical.
 
 # Storing Long-Term Memory
 
@@ -245,11 +263,10 @@ Apply these heuristics when updating memories:
 Memories with `type: quick-reference` are special:
 - They contain workflows, checklists, or procedures
 - They should be surfaced during bootstrap when relevant
-- They often belong in `.ai-cerebrum/core_processes/critical_workflows.md`
-- High-importance quick-references should be duplicated in critical workflows
+- High-importance quick-references are candidates for `critical: true` flag
 
 When you create a `quick-reference` memory:
-1. Consider if it should also be added to `critical_workflows.md`
+1. Consider if it should be marked `critical: true` (use sparingly)
 2. Tag it with the relevant project name
 3. Set importance based on impact (prevents bugs = high, nice-to-have = low)
 
@@ -265,12 +282,26 @@ project: data-platform  # For general data platform work
 
 This allows future sessions to automatically surface relevant memories when working in specific project directories.
 
-## Surfacing Project Memories During Bootstrap
+## Surfacing Memories During Bootstrap
 
-When initializing in a project directory:
-1. Determine the current project from the working directory
-2. Scan short-term memory index for entries with matching `project` field
-3. Surface high-importance project-specific memories first
-4. Check `critical_workflows.md` for project-specific workflows
+When initializing, the bootstrap process should surface memories in this priority order:
 
-This ensures you always have relevant context when starting work on a project.
+### 1. Critical Memories (Highest Priority)
+- Read the "⚠️ CRITICAL - Read Every Session" section of `short-term-memory/.ai/index.md`
+- Read the "⚠️ CRITICAL - Read Every Session" section of `long-term-memory/.ai/index.md` (if it exists)
+- These memories have `critical: true` and must be reviewed every session
+
+### 2. High-Reference Memories
+- Scan index for memories with `reference_count >= 5`
+- These are frequently-used memories that may not be critical but are highly relevant
+
+### 3. Project-Specific Memories
+- Determine the current project from the working directory
+- Scan short-term memory index for entries with matching `project` field
+- Surface high-importance project-specific memories first
+
+### 4. Recent High-Importance Memories
+- Scan for `importance: high` memories from the last 30 days
+- These provide recent context that may be relevant
+
+This tiered approach ensures critical information is never missed while keeping bootstrap time reasonable.
