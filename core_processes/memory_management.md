@@ -92,9 +92,29 @@ can create, modify, and delete files in this directory as you see fit.
 Each "memory" in the short-term memory should be stored as a separate file. The
 file name should follow the pattern: `YYYY-MM-DD_brief_description.md`
 
-Examples:
-- `2025-01-28_pipefitter_orb_research.md`
-- `2025-01-27_memory_structure_discussion.md`
+**IMPORTANT**: Always use the system date (not guessed dates) when creating memory files.
+
+## Getting the Current Date
+
+Before creating a memory file, always get the system date first:
+
+```bash
+date +%Y-%m-%d
+```
+
+Then use that exact date in both the filename and YAML frontmatter.
+
+Example workflow:
+```bash
+# Get today's date
+date +%Y-%m-%d
+# Output: 2025-01-29
+
+# Then create file: .ai-cerebrum/short-term-memory/.ai/2025-01-29_pipefitter_testing.md
+# With YAML frontmatter using the same date
+```
+
+## Process for Summarizing Short-Term Memory
 
 ## Process for Summarizing Short-Term Memory
 
@@ -173,14 +193,20 @@ Transfer a short-term memory to long-term when:
 - **Project completion**: A project completes and its learnings should be preserved
 - **Pattern recognition**: You notice a recurring pattern or lesson worth codifying
 
+
 ### Transfer Process
 
 When transferring a memory:
-1. Create a new file in `long-term-memory/.ai/` with the same filename
-2. Optionally condense/refine the content (remove ephemeral details)
-3. Update the YAML frontmatter to reflect the transfer date
-4. Delete the short-term memory file (or move to an archive if uncertain)
-5. Update both the short-term and long-term index files
+1. Get the current system date: `date +%Y-%m-%d`
+2. Create a new file in `long-term-memory/.ai/` with the current date in the filename
+3. Copy relevant content from the short-term memory file
+4. Optionally condense/refine the content (remove ephemeral details)
+5. Update the YAML frontmatter `date` field to reflect the transfer date
+6. Delete the short-term memory file (or move to an archive if uncertain)
+7. Update both the short-term and long-term index files
+
+### Long-Term Memory Organization
+
 
 ### Long-Term Memory Organization
 
@@ -204,17 +230,36 @@ summaries for quick reference during initialization.
 New Interaction
     ↓
 [Should this be remembered?] → No → Discard
-    ↓ Yes
-Create Short-Term Memory
-    ↓
-[After 90 days OR high importance OR frequent reference]
-    ↓
-Transfer to Long-Term Memory
-    ↓
-Update Both Indexes
+# Pruning Old Memories
+
+Short-term memory should be actively pruned to keep initialization fast:
+- Memories older than 90 days should be evaluated for long-term transfer or deletion
+- Low-importance memories older than 30 days can be deleted if no longer relevant
+- Keep short-term memory focused on recent, actionable context
+
+Long-term memory should rarely be deleted, but can be:
+- Consolidated when multiple memories cover the same topic
+- Archived if technology/practices become obsolete
+- Refined to remove outdated information while preserving core lessons
+
+## Validating Memory Dates
+
+Periodically validate that all memory files have correct dates:
+
+```bash
+.ai-cerebrum/scripts/validate_dates.sh
 ```
 
-# Pruning Old Memories
+This script checks for:
+- Future dates (indicates incorrect date entry)
+- Mismatches between filename date and YAML frontmatter date
+- Missing date fields
+- Memories older than 90 days in short-term (candidates for transfer)
+
+Run this validation:
+- After manually creating or editing memory files
+- Before committing memory changes to Git
+- Periodically as part of memory maintenance
 
 Short-term memory should be actively pruned to keep initialization fast:
 - Memories older than 90 days should be evaluated for long-term transfer or deletion
