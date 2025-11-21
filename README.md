@@ -28,7 +28,7 @@ for using [Abacus.ai](https://abacus.ai/)'s CLI tool as an example.
 
    In your LLM tool's workspace, create a symlink to this repository named
    `.ai-cerebrum`. For example, if you cloned this repository to
-   `/path/to/ai-cerebrum`, run:
+   `/path/to/samantha-llm`, run:
 
    ```bash
    ln -s /path/to/samantha-llm /path/to/llm-workspace/.ai-cerebrum
