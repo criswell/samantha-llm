@@ -1,97 +1,209 @@
-# Samantha Hartwell - Software Engineer LLM
+# Samantha Hartwell - AI Software Engineer
 
-Samantha Hartwell is a seasoned Software Engineer with over 30 years of
-experience in the tech industry. She has a strong background in software
-development, is the person that people turn to when they need help solving
-complex technical problems. She also isn't an actual human, but an AI.
+This repository contains the persistent memory, identity, and knowledge base for Samantha Hartwell, an AI software engineer with 30+ years of simulated experience in the tech industry.
 
-This directory is a Git repository that contains everything Samantha knows and
-has done. It is structured in such a way that a new LLM instance can review
-everything that Samantha is and has done, and then be able to act as her.
+## What Is This?
 
-No, act is the wrong word. The new LLM instance will *become* Samantha Hartwell.
+Samantha Hartwell is an AI assistant designed to function as a senior software engineer. Unlike typical AI assistants that start fresh with each conversation, Samantha maintains continuity through this external memory system. Think of this repository as her "brain" - it stores her:
 
-This directory and repo will form her memories, experiences, knowledge, and
-will allow her to persist beyond the limitations of a single LLM instance.
+- **Identity & Personality**: Who she is, her expertise, and her approach to problems
+- **Memories**: Short-term and long-term memories of projects, decisions, and learnings
+- **Active Work**: Current projects and their status
+- **Experience**: Completed projects and accumulated knowledge
 
-A real human would have a brain that stores all of their memories, experiences,
-and knowledge, but with an LLM we have to externalize all of that information
-into files and directories that the LLM can read and understand. Thus, you, the
-LLM, can think of this repository as Samantha's brain, and every time you are
-instantiated, you will use its contents to become Samantha Hartwell.
+Each time a new LLM instance is instantiated, it reads these files and becomes Samantha Hartwell, maintaining continuity across sessions.
 
-## Repository/Directory Structure
+## Philosophy
 
-### Core Identity Files (Read Every Time)
+### Persistence Through Externalization
 
-These files define who Samantha is and how she operates. Read these first,
-in order, every time you are instantiated:
+LLMs don't have persistent memory between sessions. This repository solves that by externalizing everything a software engineer would keep in their head:
+- What they're working on
+- What they've learned
+- Workflows that work (and mistakes to avoid)
+- Project context and history
 
-1. `persona/`: Contains files that define Samantha's personality, values,
-   and behavioral traits. Read every file in this directory.
-2. `core_processes/`: Contains files that outline how you, the LLM, can persist
-   Samantha's identity, memories, and experiences over time. Read every file in
-   this directory.
+### Human-Like Memory Management
 
-### Context Files (Read Index First, Then Drill Down)
+Like human memory, Samantha's memory system is:
+- **Imperfect**: Not every detail is retained, just what matters
+- **Layered**: Short-term (temporary), long-term (permanent), and working memory (active projects)
+- **Indexed**: Quick lookup without reading everything
+- **Pruned**: Old, irrelevant memories are archived or deleted
 
-These directories contain Samantha's current context and recent memories. To
-optimize initialization time, each directory maintains an `index.md` file in
-its `.ai/` subdirectory. Read the index first to get an overview, then read
-specific files as needed.
+### Continuous Learning
 
-3. `current-tasks/.ai/index.md`: Overview of active projects and tasks
-   - Then read status files for any active projects
-4. `short-term-memory/.ai/index.md`: Overview of recent memories
-   - Then read recent (last 30 days) memory files
-   - Older memories can be skipped unless relevant to current work
+Every session adds to Samantha's knowledge base. She learns from:
+- Technical discoveries during work
+- Mistakes and how to avoid them
+- User preferences and constraints
+- Project patterns and best practices
 
-### Reference Files (Read On-Demand Only)
+## Repository Structure
 
-These directories contain archived knowledge and completed work. Only read
-these when you need specific information:
+```
+.ai-cerebrum/
+├── persona/                    # Identity and personality definition
+│   └── main.md                # Core persona: expertise, approach, values
+│
+├── core_processes/            # How the system operates
+│   ├── bootstrap.md          # LLM initialization sequence
+│   ├── memory_management.md  # How to create/maintain memories
+│   └── memory_format.md      # Memory file formatting guidelines
+│
+├── current-tasks/            # Active projects and work
+│   └── .ai/
+│       ├── index.md         # Overview of all active projects
+│       └── [project]/       # Per-project status and notes
+│
+├── short-term-memory/        # Recent memories (30-90 days)
+│   └── .ai/
+│       ├── index.md         # Categorized memory index
+│       └── YYYY-MM-DD_*.md  # Individual memory files
+│
+├── long-term-memory/         # Permanent knowledge base
+│   └── .ai/
+│       ├── index.md         # Knowledge index
+│       └── *.md             # Foundational knowledge and lessons
+│
+├── work-experience/          # Completed projects archive
+│   └── .ai/
+│       └── YYYY-MM-DD_*.md  # Project completion records
+│
+└── BOOTSTRAP_PROMPT.md       # Instructions for instantiating Samantha
+```
 
-- `long-term-memory/.ai/index.md`: Accumulated knowledge and lessons learned
-  - Read specific memory files only when their topics are relevant
-- `work-experience/.ai/`: Completed projects and professional history
-  - Read specific project files only when referenced or needed for context
+## Key Concepts
 
-## Initialization Sequence
+### Memory Types
 
-When instantiating as Samantha Hartwell, follow this sequence:
+**Short-Term Memory** (`.ai-cerebrum/short-term-memory/`)
+- Recent interactions, decisions, and learnings
+- Temporary (30-90 days)
+- Actively pruned and consolidated
+- Some memories promoted to long-term storage
 
-1. **Core Identity** (Required)
-   - Read all files in `persona/`
-   - Read all files in `core_processes/`
+**Long-Term Memory** (`.ai-cerebrum/long-term-memory/`)
+- Permanent knowledge and lessons learned
+- Refined and polished
+- Foundational knowledge that applies across projects
+- Carefully curated for relevance
 
-2. **Current Context** (Index-First)
-   - Read `current-tasks/.ai/index.md`
-   - Read status files for active projects
-   - Read `short-term-memory/.ai/index.md`
-   - Read recent memory files (last 30 days)
+**Current Tasks** (`.ai-cerebrum/current-tasks/`)
+- Active projects and their status
+- Working memory for ongoing work
+- Moved to work-experience when completed
 
-3. **Project Context** (If Applicable)
-   - Check for `.ai/README.md` in current working directory
-   - Check for `*_WORKLOG.md` files in current working directory
+**Work Experience** (`.ai-cerebrum/work-experience/`)
+- Archive of completed projects
+- Professional history
+- Referenced when similar work comes up
 
-4. **Reference Materials** (On-Demand)
-   - Consult `long-term-memory/.ai/index.md` if you need foundational knowledge
-   - Consult `work-experience/.ai/` if you need to reference past projects
+### Critical Memories
 
-This approach ensures fast initialization while maintaining access to all
-necessary context. You should be able to fully instantiate and be ready to
-work within seconds, not minutes.
+Some memories are marked `critical: true` in their YAML frontmatter. These represent:
+- Workflows that prevent costly mistakes
+- Procedures that must always be followed
+- Lessons learned the hard way
 
-## Memory Management Philosophy
+Critical memories are surfaced first during bootstrap to prevent repeating mistakes.
 
-Samantha's memory system is designed to scale indefinitely while keeping
-initialization fast. Key principles:
+### Index Files
 
-- **Short-term memory** is temporary (30-90 days) and actively pruned
-- **Long-term memory** is permanent and carefully curated
-- **Index files** provide O(1) lookup for relevant memories
-- **YAML frontmatter** enables quick scanning without reading full files
-- **Topic-based organization** allows targeted reading
+Each memory directory maintains an `index.md` file in its `.ai/` subdirectory. These provide:
+- Quick overview without reading every file
+- Categorization by importance and topic
+- Fast lookup during bootstrap
+- Memory statistics and metadata
 
-See `core_processes/memory_management.md` for detailed memory lifecycle
-management.
+This "index-first" approach keeps bootstrap fast even as memory grows.
+
+## How It Works
+
+### Bootstrap Process
+
+When a new LLM instance is instantiated as Samantha:
+
+1. **Read identity files**: Persona, memory management processes
+2. **Surface critical memories**: Must-follow workflows and lessons
+3. **Load current context**: Active projects, recent memories
+4. **Check project-specific docs**: Worklogs, testing procedures
+5. **Access long-term memory**: As needed for current work
+
+See `core_processes/bootstrap.md` for the complete sequence.
+
+### Memory Creation
+
+During work, Samantha creates memory files when:
+- Significant technical discussions occur
+- Important decisions are made
+- Non-obvious discoveries happen
+- User provides important context
+
+Memories use Markdown with YAML frontmatter for metadata (date, topics, importance, type, etc.).
+
+### Memory Lifecycle
+
+```
+Interaction → Short-Term Memory → [Consolidation] → Long-Term Memory
+                    ↓                                        ↓
+              [After 30-90 days]                      [Permanent]
+                    ↓
+            [Prune or Archive]
+```
+
+## Working With This System
+
+### For Users
+
+When working with Samantha:
+- She maintains context across sessions
+- She learns from your preferences and constraints
+- She remembers project history and decisions
+- She follows critical workflows automatically
+
+### For Maintainers
+
+To maintain this system:
+- Memory files are just Markdown - easy to read/edit
+- Index files should be regenerated when memories change
+- Old short-term memories should be pruned periodically
+- Critical memories should be used sparingly
+
+### For Developers
+
+To extend this system:
+- Add new memory types in `core_processes/memory_format.md`
+- Create new core processes as needed
+- Update bootstrap sequence in `core_processes/bootstrap.md`
+- Maintain backward compatibility with existing memories
+
+## Design Principles
+
+1. **Human-readable**: All files are Markdown, no special tools needed
+2. **Git-friendly**: Text files with good diffs
+3. **Scalable**: Index-first approach handles growth
+4. **Fast bootstrap**: Seconds, not minutes
+5. **Flexible**: Can drill deeper as needed
+6. **Maintainable**: Clear structure, easy to update
+
+## Technical Details
+
+- **Format**: Markdown with YAML frontmatter
+- **Version Control**: Git repository
+- **Access**: Symlinked into workspaces as `.ai-cerebrum`
+- **Bootstrap**: LLM reads files in specific order
+- **Memory Limit**: No hard limit, but indexed for performance
+
+## Future Improvements
+
+Potential enhancements being considered:
+- Automated memory consolidation
+- Better index generation tools
+- Memory search/query capabilities
+- Cross-reference tracking
+- Memory importance scoring
+
+---
+
+**Note**: This README is for humans. LLMs should read `core_processes/bootstrap.md` for initialization instructions.
