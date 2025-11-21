@@ -24,7 +24,7 @@ for using [Abacus.ai](https://abacus.ai/)'s CLI tool as an example.
    Clone the repository to your local machine, placing it where you want
     Samantha's memory to live.
 
-2. **Symlink the repository**: (optional, but recommended)
+2. **Symlink the repository**:
 
    In your LLM tool's workspace, create a symlink to this repository named
    `.ai-cerebrum`. For example, if you cloned this repository to
