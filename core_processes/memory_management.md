@@ -24,7 +24,7 @@ topics: [tag1, tag2]      # Relevant topics/tags for categorization
 importance: low|medium|high  # Subjective importance rating
 type: interaction|learning|decision|technical|quick-reference  # Memory type
 reference_count: 0        # Number of times referenced across sessions (optional)
-project: project-name     # Associated project (optional, e.g., "pipefitter", "mortar")
+project: project-name     # Associated project (optional, e.g., "project-alpha", "project-beta")
 ---
 ```
 
@@ -40,15 +40,15 @@ Example memory file:
 ```markdown
 ---
 date: 2025-01-28
-topics: [circleci, pipefitter, orbs]
+topics: [api, authentication, oauth]
 importance: medium
 type: technical
-project: pipefitter
+project: project-alpha
 ---
 
-# CircleCI Orb Namespace Research
+# OAuth Implementation Research
 
-Discovered that CircleCI orbs can come from multiple namespaces...
+Discovered that OAuth 2.0 requires careful state management...
 ```
 
 
@@ -56,14 +56,14 @@ Example memory file:
 ```markdown
 ---
 date: 2025-01-28
-topics: [circleci, pipefitter, orbs]
+topics: [api, authentication, oauth]
 importance: medium
 type: technical
 ---
 
-# CircleCI Orb Namespace Research
+# OAuth Implementation Research
 
-Discovered that CircleCI orbs can come from multiple namespaces...
+Discovered that OAuth 2.0 requires careful state management...
 ```
 
 # Index Files
@@ -110,7 +110,7 @@ Example workflow:
 date +%Y-%m-%d
 # Output: 2025-01-29
 
-# Then create file: .ai-cerebrum/short-term-memory/.ai/2025-01-29_pipefitter_testing.md
+# Then create file: .ai-cerebrum/short-term-memory/.ai/2025-01-29_api_testing.md
 # With YAML frontmatter using the same date
 ```
 
@@ -212,7 +212,7 @@ When transferring a memory:
 
 Long-term memories can be organized into subdirectories by topic if the number
 of files grows large:
-- `long-term-memory/.ai/circleci/`
+- `long-term-memory/.ai/api-design/`
 - `long-term-memory/.ai/python/`
 - `long-term-memory/.ai/architecture/`
 
@@ -287,11 +287,11 @@ Example:
 ---
 date: 2025-01-29
 updated: 2025-02-15
-topics: [pipefitter, testing, ci]
+topics: [testing, automation, ci]
 importance: high
 type: quick-reference
 reference_count: 5
-project: pipefitter
+project: project-alpha
 ---
 ```
 
@@ -320,9 +320,9 @@ When you create a `quick-reference` memory:
 To enable project-specific memory surfacing during bootstrap, always tag memories with the relevant project name using the `project` field:
 
 ```yaml
-project: pipefitter  # For pipefitter-related memories
-project: mortar      # For mortar-related memories
-project: data-platform  # For general data platform work
+project: project-alpha    # For project-alpha-related memories
+project: project-beta     # For project-beta-related memories
+project: infrastructure   # For general infrastructure work
 ```
 
 This allows future sessions to automatically surface relevant memories when working in specific project directories.

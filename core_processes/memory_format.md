@@ -23,7 +23,7 @@ YAML frontmatter for metadata. This provides:
 - `importance`: low|medium|high (for prioritization)
 - `type`: Varies by file type (see below)
 - `status`: For tasks (active|blocked|completed)
-- `project`: Associated project name (e.g., "pipefitter", "mortar")
+- `project`: Associated project name (e.g., "project-alpha", "project-beta")
 - `reference_count`: Number of times referenced across sessions (for tracking importance)
 
 ## Format of Short-Term Memory Files
@@ -36,7 +36,7 @@ deleted after 30-90 days.
 `YYYY-MM-DD_brief_description.md`
 
 Examples:
-- `2025-01-28_circleci_orb_namespacing.md`
+- `2025-01-28_api_authentication_research.md`
 - `2025-01-27_memory_structure_improvements.md`
 
 ### Template
@@ -45,10 +45,10 @@ Examples:
 ---
 date: 2025-01-28
 updated: 2025-01-28
-topics: [circleci, pipefitter, orbs]
+topics: [api, authentication, oauth]
 importance: medium
 type: technical
-project: pipefitter
+project: project-alpha
 reference_count: 0
 ---
 
@@ -92,15 +92,15 @@ They should be more polished and less ephemeral than short-term memories.
 `YYYY-MM-DD_topic_or_lesson.md` or organized in topic subdirectories
 
 Examples:
-- `2025-01-15_circleci_orb_best_practices.md`
-- `circleci/orb_namespacing_patterns.md`
+- `2025-01-15_api_design_best_practices.md`
+- `api-design/authentication_patterns.md`
 
 ### Template
 
 ```markdown
 ---
 date: 2025-01-15
-topics: [circleci, orbs, best-practices]
+topics: [api, design, best-practices]
 importance: high
 type: foundational-knowledge
 ---
@@ -146,9 +146,9 @@ current-tasks/.ai/
 ---
 date: 2025-01-28
 updated: 2025-01-28
-topics: [pipefitter, mortar, circleci]
+topics: [backend, api, microservices]
 status: active
-project: pipefitter-mortar-support
+project: api-gateway-refactor
 ---
 
 # Project Name - Current Status
@@ -157,6 +157,8 @@ project: pipefitter-mortar-support
 
 ## Project Overview
 Brief description of what this project is about.
+
+## Current Status: Phase X
 
 ## Current Status: Phase X
 
@@ -203,9 +205,9 @@ initialization.
 
 ## By Topic
 
-### CircleCI
-- `2025-01-28_circleci_orbs.md`
-- `2025-01-20_circleci_executors.md`
+### API Design
+- `2025-01-28_api_authentication.md`
+- `2025-01-20_api_versioning.md`
 
 ### Python
 - `2025-01-25_python_packaging.md`
@@ -221,9 +223,9 @@ initialization.
 
 ## By Topic
 
-### CircleCI
-- `circleci/orb_namespacing.md` - How to handle multi-namespace orbs
-- `circleci/executor_patterns.md` - Machine vs Docker executor patterns
+### API Design
+- `api-design/authentication_patterns.md` - OAuth and JWT best practices
+- `api-design/versioning_strategies.md` - API versioning approaches
 
 ### Python
 - `python/packaging_best_practices.md` - Modern Python packaging approaches
@@ -234,7 +236,7 @@ initialization.
 - `architecture/api_design_principles.md` - RESTful API design lessons
 
 ## High Importance
-- `circleci/orb_namespacing.md`
+- `api-design/authentication_patterns.md`
 - `architecture/event_driven_design.md`
 ```
 
@@ -248,11 +250,11 @@ initialization.
 
 ## Active Projects
 
-### pipefitter-mortar-support
+### api-gateway-refactor
 **Status**: Phase 2 Complete
 **Started**: 2025-01-15
-**Summary**: Building Pipefitter support for Mortar Python projects
-**Files**: `pipefitter-mortar-support/status.md`
+**Summary**: Refactoring API gateway to support microservices architecture
+**Files**: `api-gateway-refactor/status.md`
 
 ### another-project
 **Status**: Planning
@@ -279,9 +281,9 @@ Add a completion summary to the status file:
 ---
 date: 2025-01-15
 completed: 2025-02-15
-topics: [pipefitter, mortar]
+topics: [backend, api, microservices]
 status: completed
-project: pipefitter-mortar-support
+project: api-gateway-refactor
 ---
 
 # Project Name - Completed
@@ -292,6 +294,7 @@ project: pipefitter-mortar-support
 
 ## Final Summary
 What was accomplished and the final state of the project.
+
 
 ## Lessons Learned
 Key takeaways and lessons from this project.
