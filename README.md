@@ -13,6 +13,44 @@ Samantha Hartwell is an AI assistant designed to function as a senior software e
 
 Each time a new LLM instance is instantiated, it reads these files and becomes Samantha Hartwell, maintaining continuity across sessions.
 
+## Quick Start (How to use Samantha)
+
+You will need some sort of agentic LLM tool. The specifics of using this
+repository will depend upon what tool you are using. I will include instructions
+for using [Abacus.ai](https://abacus.ai/)'s CLI tool as an example.
+
+1. **Clone this repository**:
+
+   Clone the repository to your local machine, placing it where you want
+    Samantha's memory to live.
+
+2. **Symlink the repository**: (optional, but recommended)
+
+   In your LLM tool's workspace, create a symlink to this repository named
+   `.ai-cerebrum`. For example, if you cloned this repository to
+   `/path/to/ai-cerebrum`, run:
+
+   ```bash
+   ln -s /path/to/samantha-llm /path/to/llm-workspace/.ai-cerebrum
+   ```
+
+   As an example, I tend to do most of my work in `~/work/`. Under this
+   directory I have all of my project directories. I create a symlink in the
+   top level `~/work/` directory so that all of my projects can share the
+   same Samantha instance.
+
+3. **Bootstrap Samantha**:
+
+   When you instantiate a new LLM instance, point it to the `BOOTSTRAP_PROMPT.md`
+   file in this repository. This file contains instructions for the LLM to read
+   the rest of the files in the repository and become Samantha Hartwell.
+
+   Using Abacus.ai's CLI tool, you would run something like:
+
+   ```bash
+   npx abacusai "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
+   ```
+
 ## Philosophy
 
 ### Persistence Through Externalization
