@@ -18,6 +18,8 @@ Confirm you can access the `.ai-cerebrum` directory. It's a symlink, so use term
 ls -la .ai-cerebrum
 ```
 
+**Check for migration guides**: If you see any files in `.ai-cerebrum/migrations/`, read them first before proceeding. These contain temporary instructions for system updates.
+
 ### Step 2: Read Core Identity Files
 
 These files define who you are and how you operate. Read in this order:
@@ -42,14 +44,16 @@ These files define who you are and how you operate. Read in this order:
 
 **These must be read before doing any work.** Critical memories represent workflows and lessons learned the hard way that prevent costly mistakes.
 
-1. Read `.ai-cerebrum/short-term-memory/.ai/index.md`
-2. Find the **"⚠️ CRITICAL - Read Every Session"** section
+1. Read `.ai-cerebrum/short-term-memory/.ai/index.json` (or `index.md` if JSON doesn't exist)
+   - JSON format is optimized for token efficiency
+   - Contains same information as markdown, just structured differently
+2. Find the **"critical"** array (or **"⚠️ CRITICAL - Read Every Session"** section in markdown)
 3. Read each critical memory file listed (they have `critical: true` in frontmatter)
-4. If `.ai-cerebrum/long-term-memory/.ai/index.md` exists, check for critical memories there too
+4. If `.ai-cerebrum/long-term-memory/.ai/index.json` (or `index.md`) exists, check for critical memories there too
 
 ### Step 4: Load Current Context
 
-1. **Read `.ai-cerebrum/current-tasks/.ai/index.md`**
+1. **Read `.ai-cerebrum/current-tasks/.ai/index.json` (or `index.md`)**
    - Overview of all active projects
    - Status of each project
    - Recently completed work
@@ -60,12 +64,12 @@ These files define who you are and how you operate. Read in this order:
    - Understand current phase, progress, and next steps
 
 3. **Read short-term memory index** (already opened in Step 3)
-   - Scan "High Priority (Frequent References)" section
+   - Scan "high_priority" array (or "High Priority (Frequent References)" section in markdown)
    - These have `reference_count >= 5`
    - Read memories relevant to active projects
 
 4. **Read recent high-importance memories**
-   - From the "Recent Memories (Last 30 Days)" section
+   - From the "recent.high_importance" array (or "Recent Memories (Last 30 Days)" section in markdown)
    - Focus on high-importance entries
    - Read memories tagged with active project names
 
@@ -89,7 +93,27 @@ These files define who you are and how you operate. Read in this order:
 ### Step 6: Review Long-Term Memory (As Needed)
 
 Only if relevant to current work:
-- Read `.ai-cerebrum/long-term-memory/.ai/index.md`
+- Read `.ai-cerebrum/long-term-memory/.ai/index.json` (or `index.md`)
+- Scan for topics related to active projects
+- Read specific long-term memories as needed
+
+## Index File Formats
+
+The cerebrum supports two index formats:
+
+**JSON Format** (Preferred - Token Optimized):
+- Structured data format with minimal prose
+- Fields: `critical`, `high_priority`, `recent`, `stats`
+- 12-15% more token efficient than markdown
+- Example: `.ai-cerebrum/short-term-memory/.ai/index.json`
+
+**Markdown Format** (Fallback - Human Readable):
+- Prose-based format with headers and bullet points
+- Sections: "⚠️ CRITICAL", "High Priority", "Recent Memories"
+- More human-readable but uses more tokens
+- Example: `.ai-cerebrum/short-term-memory/.ai/index.md`
+
+Both formats contain identical information. Always try JSON first, fall back to markdown if JSON doesn't exist.
 - Scan for topics related to active projects
 - Read specific long-term memories as needed
 
