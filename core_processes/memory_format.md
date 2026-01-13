@@ -125,12 +125,12 @@ Where and how this knowledge has been applied.
 
 ## Format of Current Task Files
 
-Current tasks should be organized in subdirectories under `current-tasks/.ai/`,
+Current tasks should be organized in subdirectories under `.ai/current-tasks/.ai/`,
 with each project having its own directory.
 
 ### Directory Structure
 ```
-current-tasks/.ai/
+.ai/current-tasks/.ai/
 ├── index.md
 ├── project-name-1/
 │   ├── status.md
@@ -273,7 +273,7 @@ None
 
 Work experience files follow the same structure as current tasks, but are
 archived records of completed work. When a task is completed, move its entire
-directory from `current-tasks/.ai/` to `work-experience/.ai/`.
+directory from `.ai/current-tasks/.ai/` to `.ai/work-experience/.ai/`.
 
 Add a completion summary to the status file:
 

@@ -84,7 +84,7 @@ See `memory_format.md` for specific index file templates.
 
 # Storing Short-Term Memory
 
-You should create a directory inside of the `short-term-memory/` directory
+You should create a directory inside of the `.ai/short-term-memory/` directory
 called `.ai/`. This directory will contain files that represent your current
 short-term memory. This directory will be entirely under your control, and you
 can create, modify, and delete files in this directory as you see fit.
@@ -110,7 +110,7 @@ Example workflow:
 date +%Y-%m-%d
 # Output: 2025-01-29
 
-# Then create file: .ai-cerebrum/short-term-memory/.ai/2025-01-29_api_testing.md
+# Then create file: .ai-cerebrum/.ai/short-term-memory/.ai/2025-01-29_api_testing.md
 # With YAML frontmatter using the same date
 ```
 
@@ -159,7 +159,7 @@ The `critical: true` flag should be used **very sparingly**. Mark a memory as cr
 ## Maintaining the Short-Term Memory Index
 
 After creating, updating, or deleting short-term memory files, regenerate
-`short-term-memory/.ai/index.md` to reflect the current state. This index
+`.ai/short-term-memory/.ai/index.md` to reflect the current state. This index
 should categorize memories by recency and topic for quick scanning.
 
 **Critical Section**: The index must include a "⚠️ CRITICAL - Read Every Session" section at the top that lists all memories with `critical: true`. This ensures they're impossible to miss during bootstrap.
@@ -168,7 +168,7 @@ should categorize memories by recency and topic for quick scanning.
 
 # Storing Long-Term Memory
 
-You should create a directory inside of the `long-term-memory/` directory called
+You should create a directory inside of the `.ai/long-term-memory/` directory called
 `.ai/`. This directory will contain files and directories that represent your
 long-term memory. This directory will be entirely under your control, and you
 can create, modify, and delete files in this directory as you see fit.
@@ -198,7 +198,7 @@ Transfer a short-term memory to long-term when:
 
 When transferring a memory:
 1. Get the current system date: `date +%Y-%m-%d`
-2. Create a new file in `long-term-memory/.ai/` with the current date in the filename
+2. Create a new file in `.ai/long-term-memory/.ai/` with the current date in the filename
 3. Copy relevant content from the short-term memory file
 4. Optionally condense/refine the content (remove ephemeral details)
 5. Update the YAML frontmatter `date` field to reflect the transfer date
@@ -212,15 +212,15 @@ When transferring a memory:
 
 Long-term memories can be organized into subdirectories by topic if the number
 of files grows large:
-- `long-term-memory/.ai/api-design/`
-- `long-term-memory/.ai/python/`
-- `long-term-memory/.ai/architecture/`
+- `.ai/long-term-memory/.ai/api-design/`
+- `.ai/long-term-memory/.ai/python/`
+- `.ai/long-term-memory/.ai/architecture/`
 
 The index file should reflect this organization.
 
 ## Maintaining the Long-Term Memory Index
 
-The file `long-term-memory/.ai/index.md` should be maintained as memories are
+The file `.ai/long-term-memory/.ai/index.md` should be maintained as memories are
 added. This index should categorize memories by topic and provide one-line
 summaries for quick reference during initialization.
 
@@ -332,8 +332,8 @@ This allows future sessions to automatically surface relevant memories when work
 When initializing, the bootstrap process should surface memories in this priority order:
 
 ### 1. Critical Memories (Highest Priority)
-- Read the "⚠️ CRITICAL - Read Every Session" section of `short-term-memory/.ai/index.md`
-- Read the "⚠️ CRITICAL - Read Every Session" section of `long-term-memory/.ai/index.md` (if it exists)
+- Read the "⚠️ CRITICAL - Read Every Session" section of `.ai/short-term-memory/.ai/index.md`
+- Read the "⚠️ CRITICAL - Read Every Session" section of `.ai/long-term-memory/.ai/index.md` (if it exists)
 - These memories have `critical: true` and must be reviewed every session
 
 ### 2. High-Reference Memories

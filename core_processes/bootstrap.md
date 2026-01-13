@@ -44,16 +44,16 @@ These files define who you are and how you operate. Read in this order:
 
 **These must be read before doing any work.** Critical memories represent workflows and lessons learned the hard way that prevent costly mistakes.
 
-1. Read `.ai-cerebrum/short-term-memory/.ai/index.json` (or `index.md` if JSON doesn't exist)
+1. Read `.ai-cerebrum/.ai/short-term-memory/.ai/index.json` (or `index.md` if JSON doesn't exist)
    - JSON format is optimized for token efficiency
    - Contains same information as markdown, just structured differently
 2. Find the **"critical"** array (or **"⚠️ CRITICAL - Read Every Session"** section in markdown)
 3. Read each critical memory file listed (they have `critical: true` in frontmatter)
-4. If `.ai-cerebrum/long-term-memory/.ai/index.json` (or `index.md`) exists, check for critical memories there too
+4. If `.ai-cerebrum/.ai/long-term-memory/.ai/index.json` (or `index.md`) exists, check for critical memories there too
 
 ### Step 4: Load Current Context
 
-1. **Read `.ai-cerebrum/current-tasks/.ai/index.json` (or `index.md`)**
+1. **Read `.ai-cerebrum/.ai/current-tasks/.ai/index.json` (or `index.md`)**
    - Overview of all active projects
    - Status of each project
    - Recently completed work

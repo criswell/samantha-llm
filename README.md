@@ -13,18 +13,67 @@ Samantha Hartwell is an AI assistant designed to function as a senior software e
 
 Each time a new LLM instance is instantiated, it reads these files and becomes Samantha Hartwell, maintaining continuity across sessions.
 
+## Installation
+
+### Requirements
+
+- Python 3.8 or higher
+- Git
+
+### Quick Install
+
+The installer is a cross-platform Python script that works on Linux, macOS, and Windows.
+
+**Linux/macOS:**
+```bash
+git clone https://github.com/yourusername/samantha-llm.git
+cd samantha-llm
+./samantha-llm install
+```
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/yourusername/samantha-llm.git
+cd samantha-llm
+python samantha-llm install
+```
+
+The installer will:
+- Create a configuration directory with repository path and settings
+- Install the `samantha-llm` command to your system PATH
+- Configure platform-specific paths:
+  - **Linux/macOS**: `~/.local/bin/` (symlink) and `~/.config/samantha-llm/` (config)
+  - **Windows**: `%LOCALAPPDATA%\Programs\samantha-llm\` (copy + .bat wrapper) and `%APPDATA%\samantha-llm\` (config)
+
+### Available Commands
+
+After installation:
+- `samantha-llm status` - Check installation status and configuration
+- `samantha-llm version` - Show version and platform information
+- `samantha-llm uninstall` - Remove the installation
+- `samantha-llm help` - Show available commands
+
+### PATH Configuration
+
+**Linux/macOS:** If `~/.local/bin` is not in your PATH, add this line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+
+```bash
+export PATH="${HOME}/.local/bin:${PATH}"
+```
+
+Then restart your shell or run `source ~/.bashrc` (or `~/.zshrc`).
+
+**Windows:** The installer attempts to add the install directory to your user PATH automatically. If this fails, restart your terminal/PowerShell, or manually add it to your PATH through System Properties.
+
 ## Quick Start (How to use Samantha)
+
+After completing the installation above, follow these steps to use Samantha in your projects.
 
 You will need some sort of agentic LLM tool. The specifics of using this
 repository will depend upon what tool you are using. I will include instructions
 for using [Abacus.ai](https://abacus.ai/)'s CLI tool as an example.
 
-1. **Clone this repository**:
-
-   Clone the repository to your local machine, placing it where you want
-    Samantha's memory to live.
-
-2. **Symlink the repository**:
+1. **Symlink the repository to your workspace**:
 
    In your LLM tool's workspace, create a symlink to this repository named
    `.ai-cerebrum`. For example, if you cloned this repository to
@@ -39,7 +88,7 @@ for using [Abacus.ai](https://abacus.ai/)'s CLI tool as an example.
    top level `~/work/` directory so that all of my projects can share the
    same Samantha instance.
 
-3. **Bootstrap Samantha**:
+2. **Bootstrap Samantha**:
 
    When you instantiate a new LLM instance, point it to the `BOOTSTRAP_PROMPT.md`
    file in this repository. This file contains instructions for the LLM to read
