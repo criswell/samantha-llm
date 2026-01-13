@@ -230,6 +230,8 @@ summaries for quick reference during initialization.
 New Interaction
     ↓
 [Should this be remembered?] → No → Discard
+```
+
 # Pruning Old Memories
 
 Short-term memory should be actively pruned to keep initialization fast:
