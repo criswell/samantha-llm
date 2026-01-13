@@ -485,23 +485,37 @@ def cmd_help(args):
 Usage:
     samantha-llm install    Install samantha-llm and configure environment
     samantha-llm uninstall  Remove samantha-llm installation
+    samantha-llm link       Link current directory to samantha-llm (create .ai-cerebrum symlink)
+    samantha-llm unlink     Unlink current directory from samantha-llm (remove .ai-cerebrum symlink)
     samantha-llm status     Show installation status and configuration
-    samantha-llm help       Show this help message
     samantha-llm version    Show version information
+    samantha-llm help       Show this help message
 
 Description:
     This tool manages the installation and configuration of the Samantha
     Hartwell LLM memory system. After installation, the samantha-llm command
     will be available system-wide.
 
+    Use 'link' to activate samantha-llm in a project directory, and 'unlink'
+    to deactivate it. This creates/removes a .ai-cerebrum symlink that provides
+    access to the samantha-llm repository and memory system.
+
     Supports Linux, macOS, and Windows.
 
 Examples:
-    # Install samantha-llm
-    ./samantha-llm.py install
+    # Install samantha-llm system-wide
+    ./samantha-llm install
+
+    # Link a project directory to samantha-llm
+    cd /path/to/project
+    samantha-llm link
 
     # Check installation status
     samantha-llm status
+
+    # Unlink a project directory
+    cd /path/to/project
+    samantha-llm unlink
 
     # Uninstall samantha-llm
     samantha-llm uninstall
@@ -521,6 +535,130 @@ def cmd_version(args):
     return 0
 
 
+def cmd_link(args):
+    """Link command - create .ai-cerebrum symlink in current directory"""
+    cwd = Path.cwd()
+    symlink_path = cwd / '.ai-cerebrum'
+
+    # Get repo path from config
+    config_file = get_config_file()
+    if not config_file.exists():
+        print_error("samantha-llm is not installed")
+        print_info("Run 'samantha-llm install' first")
+        return 1
+
+    # Parse config to get repo path
+    try:
+        config = {}
+        for line in config_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                config[key] = value.strip('"')
+
+        if 'SAMANTHA_REPO_PATH' not in config:
+            print_error("Config file is missing SAMANTHA_REPO_PATH")
+            return 1
+
+        repo_path = Path(config['SAMANTHA_REPO_PATH'])
+    except Exception as e:
+        print_error(f"Failed to read config: {e}")
+        return 1
+
+    # Check if repo path exists
+    if not repo_path.exists():
+        print_error(f"Repository not found: {repo_path}")
+        print_info("Please reinstall samantha-llm")
+        return 1
+
+    # Check if symlink already exists
+    if symlink_path.exists() or symlink_path.is_symlink():
+        # Check if it points to the correct location
+        if symlink_path.is_symlink():
+            current_target = symlink_path.resolve()
+            if current_target == repo_path:
+                print_success(f"Already linked to samantha-llm")
+                print_info(f"  Current directory: {cwd}")
+                print_info(f"  Linked to: {repo_path}")
+                return 0
+            else:
+                print_warning(f"Symlink exists but points to wrong location")
+                print_info(f"  Current target: {current_target}")
+                print_info(f"  Expected target: {repo_path}")
+                print()
+                response = input("Do you want to relink to the correct location? [y/N] ")
+                if response.lower() not in ['y', 'yes']:
+                    print_info("Link cancelled")
+                    return 0
+                print_info("Removing old symlink...")
+                symlink_path.unlink()
+        else:
+            print_error(f"A file or directory named '.ai-cerebrum' already exists")
+            print_info(f"  Location: {symlink_path}")
+            print_info("Please remove it manually before linking")
+            return 1
+
+    # Create symlink
+    try:
+        print_info(f"Creating symlink: {symlink_path} -> {repo_path}")
+        symlink_path.symlink_to(repo_path)
+        print()
+        print_success("Successfully linked to samantha-llm!")
+        print()
+        print_info(f"  Current directory: {cwd}")
+        print_info(f"  Linked to: {repo_path}")
+        print()
+        print_info("You can now access samantha-llm via .ai-cerebrum/")
+        print_info("Example: cat .ai-cerebrum/BOOTSTRAP_PROMPT.md")
+        return 0
+    except Exception as e:
+        print_error(f"Failed to create symlink: {e}")
+        return 1
+
+
+def cmd_unlink(args):
+    """Unlink command - remove .ai-cerebrum symlink from current directory"""
+    cwd = Path.cwd()
+    symlink_path = cwd / '.ai-cerebrum'
+
+    # Check if symlink exists
+    if not symlink_path.exists() and not symlink_path.is_symlink():
+        print_warning("Not linked - no .ai-cerebrum symlink found")
+        print_info(f"  Current directory: {cwd}")
+        return 0
+
+    # Check if it's actually a symlink
+    if not symlink_path.is_symlink():
+        print_error(f"'.ai-cerebrum' exists but is not a symlink")
+        print_info(f"  Location: {symlink_path}")
+        print_info("Please remove it manually")
+        return 1
+
+    # Show what we're unlinking
+    target = symlink_path.resolve()
+    print_info(f"Unlinking from samantha-llm...")
+    print_info(f"  Current directory: {cwd}")
+    print_info(f"  Currently linked to: {target}")
+    print()
+
+    # Ask for confirmation
+    response = input("Remove .ai-cerebrum symlink? [y/N] ")
+    if response.lower() not in ['y', 'yes']:
+        print_info("Unlink cancelled")
+        return 0
+
+    # Remove symlink
+    try:
+        symlink_path.unlink()
+        print()
+        print_success("Successfully unlinked!")
+        print_info(f"  Removed: {symlink_path}")
+        return 0
+    except Exception as e:
+        print_error(f"Failed to remove symlink: {e}")
+        return 1
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -529,7 +667,7 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'help', 'version'],
                         help='Command to execute')
 
     args = parser.parse_args()
@@ -538,6 +676,8 @@ def main():
         'install': cmd_install,
         'uninstall': cmd_uninstall,
         'status': cmd_status,
+        'link': cmd_link,
+        'unlink': cmd_unlink,
         'help': cmd_help,
         'version': cmd_version,
     }
