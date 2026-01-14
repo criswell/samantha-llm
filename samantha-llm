@@ -3,10 +3,11 @@
 samantha-llm - Installation and management script for Samantha Hartwell LLM
 
 Cross-platform installer supporting Linux, macOS, and Windows.
-Version: 0.2.0
+Version: 0.3.0
 """
 
 import argparse
+import json
 import os
 import platform
 import shutil
@@ -16,8 +17,10 @@ from pathlib import Path
 from datetime import datetime
 
 
+
+
 # Version
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 # ANSI color codes
 class Colors:
@@ -108,7 +111,89 @@ def get_repo_dir():
 
 def get_config_file():
     """Get config file path"""
+    return get_config_dir() / 'config.json'
+
+
+def get_old_config_file():
+    """Get old config file path (for migration)"""
     return get_config_dir() / 'config'
+
+
+def read_config():
+    """Read JSON config file"""
+    config_file = get_config_file()
+    if not config_file.exists():
+        return None
+
+    try:
+        with open(config_file, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print_error(f"Failed to read config: {e}")
+        return None
+
+
+def write_config(config):
+    """Write JSON config file"""
+    config_file = get_config_file()
+    config_dir = get_config_dir()
+
+    # Create config directory if needed
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception as e:
+        print_error(f"Failed to write config: {e}")
+        return False
+
+
+def migrate_old_config():
+    """Migrate old shell-style config to JSON"""
+    old_config_file = get_old_config_file()
+    new_config_file = get_config_file()
+
+    # Check if old config exists and new doesn't
+    if not old_config_file.exists() or new_config_file.exists():
+        return False
+
+    print_info("Migrating old config to JSON format...")
+
+    # Parse old config
+    try:
+        old_config = {}
+        for line in old_config_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                old_config[key] = value.strip('"')
+
+        # Create new JSON config
+        new_config = {
+            'version': old_config.get('SAMANTHA_VERSION', VERSION),
+            'platform': old_config.get('SAMANTHA_PLATFORM', get_platform()),
+            'repo_path': old_config.get('SAMANTHA_REPO_PATH', str(get_repo_dir())),
+            'agents': {},
+            'workspaces': {}
+        }
+
+        # Write new config
+        if write_config(new_config):
+            # Backup old config
+            backup_file = old_config_file.with_suffix('.backup')
+            shutil.copy2(old_config_file, backup_file)
+            print_success(f"Config migrated successfully!")
+            print_info(f"  Old config backed up to: {backup_file}")
+            print_info(f"  New config: {new_config_file}")
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        print_error(f"Config migration failed: {e}")
+        return False
 
 
 def get_install_path():
@@ -145,29 +230,20 @@ def check_path():
 
 
 def create_config():
-    """Create config file"""
-    config_dir = get_config_dir()
-    config_file = get_config_file()
+    """Create JSON config file"""
     repo_dir = get_repo_dir()
 
-    # Create config directory
-    config_dir.mkdir(parents=True, exist_ok=True)
+    print_info(f"Creating config file: {get_config_file()}")
 
-    # Write config file
-    print_info(f"Creating config file: {config_file}")
-    config_content = f"""# Samantha Hartwell LLM Configuration
-# Auto-generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    config = {
+        'version': VERSION,
+        'platform': get_platform(),
+        'repo_path': str(repo_dir),
+        'agents': {},
+        'workspaces': {}
+    }
 
-# Path to the samantha-llm repository
-SAMANTHA_REPO_PATH="{repo_dir}"
-
-# Version
-SAMANTHA_VERSION="{VERSION}"
-
-# Platform
-SAMANTHA_PLATFORM="{get_platform()}"
-"""
-    config_file.write_text(config_content)
+    return write_config(config)
 
 
 def install_unix():
@@ -262,6 +338,9 @@ def cmd_install(args):
     """Install command"""
     print_info("Installing samantha-llm...")
 
+    # Check for old config and migrate
+    migrate_old_config()
+
     # Check if already installed
     if is_installed():
         print_warning("samantha-llm is already installed.")
@@ -277,7 +356,9 @@ def cmd_install(args):
         print_info("Reinstalling...")
 
     # Create config
-    create_config()
+    if not create_config():
+        print_error("Failed to create config file")
+        return 1
 
     # Platform-specific installation
     system = get_platform()
@@ -411,23 +492,21 @@ def cmd_status(args):
         print_success("Config: Found")
         print(f"  Location: {config_file}")
 
-        # Parse config
-        try:
-            config = {}
-            for line in config_file.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    config[key] = value.strip('"')
+        # Parse JSON config
+        config = read_config()
+        if config:
+            if 'repo_path' in config:
+                print(f"  Repo path: {config['repo_path']}")
+            if 'version' in config:
+                print(f"  Version: {config['version']}")
+            if 'platform' in config:
+                print(f"  Platform: {config['platform']}")
+            if 'default_agent' in config:
+                print(f"  Default agent: {config['default_agent']}")
 
-            if 'SAMANTHA_REPO_PATH' in config:
-                print(f"  Repo path: {config['SAMANTHA_REPO_PATH']}")
-            if 'SAMANTHA_VERSION' in config:
-                print(f"  Version: {config['SAMANTHA_VERSION']}")
-            if 'SAMANTHA_PLATFORM' in config:
-                print(f"  Platform: {config['SAMANTHA_PLATFORM']}")
-        except Exception:
-            pass
+            # Show configured agents
+            if 'agents' in config and config['agents']:
+                print(f"  Configured agents: {', '.join(config['agents'].keys())}")
     else:
         print_error("Config: Not found")
         print(f"  Expected: {config_file}")
@@ -483,19 +562,23 @@ def cmd_help(args):
     print("""samantha-llm - Samantha Hartwell LLM Management Tool
 
 Usage:
-    samantha-llm install    Install samantha-llm and configure environment
-    samantha-llm uninstall  Remove samantha-llm installation
-    samantha-llm link       Link current directory to samantha-llm (create .ai-cerebrum symlink)
-    samantha-llm unlink     Unlink current directory from samantha-llm (remove .ai-cerebrum symlink)
-    samantha-llm status     Show installation status and configuration
-    samantha-llm version    Show version information
-    samantha-llm help       Show this help message
+    samantha-llm install           Install samantha-llm and configure environment
+    samantha-llm uninstall         Remove samantha-llm installation
+    samantha-llm setup             Configure an agent for LLM sessions
+    samantha-llm setup --default AGENT  Set default agent
+    samantha-llm agents            List configured agents
+    samantha-llm link              Link current directory to samantha-llm (create .ai-cerebrum symlink)
+    samantha-llm unlink            Unlink current directory from samantha-llm (remove .ai-cerebrum symlink)
+    samantha-llm status            Show installation status and configuration
+    samantha-llm version           Show version information
+    samantha-llm help              Show this help message
 
 Description:
     This tool manages the installation and configuration of the Samantha
     Hartwell LLM memory system. After installation, the samantha-llm command
     will be available system-wide.
 
+    Use 'setup' to configure an agent (Claude Code, Abacus.ai, or custom).
     Use 'link' to activate samantha-llm in a project directory, and 'unlink'
     to deactivate it. This creates/removes a .ai-cerebrum symlink that provides
     access to the samantha-llm repository and memory system.
@@ -506,12 +589,21 @@ Examples:
     # Install samantha-llm system-wide
     ./samantha-llm install
 
+    # Configure an agent
+    samantha-llm setup
+
     # Link a project directory to samantha-llm
     cd /path/to/project
     samantha-llm link
 
     # Check installation status
     samantha-llm status
+
+    # List configured agents
+    samantha-llm agents
+
+    # Change default agent
+    samantha-llm setup --default claude
 
     # Unlink a project directory
     cd /path/to/project
@@ -541,29 +633,17 @@ def cmd_link(args):
     symlink_path = cwd / '.ai-cerebrum'
 
     # Get repo path from config
-    config_file = get_config_file()
-    if not config_file.exists():
+    config = read_config()
+    if not config:
         print_error("samantha-llm is not installed")
         print_info("Run 'samantha-llm install' first")
         return 1
 
-    # Parse config to get repo path
-    try:
-        config = {}
-        for line in config_file.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                key, value = line.split('=', 1)
-                config[key] = value.strip('"')
-
-        if 'SAMANTHA_REPO_PATH' not in config:
-            print_error("Config file is missing SAMANTHA_REPO_PATH")
-            return 1
-
-        repo_path = Path(config['SAMANTHA_REPO_PATH'])
-    except Exception as e:
-        print_error(f"Failed to read config: {e}")
+    if 'repo_path' not in config:
+        print_error("Config file is missing repo_path")
         return 1
+
+    repo_path = Path(config['repo_path'])
 
     # Check if repo path exists
     if not repo_path.exists():
@@ -602,6 +682,16 @@ def cmd_link(args):
     try:
         print_info(f"Creating symlink: {symlink_path} -> {repo_path}")
         symlink_path.symlink_to(repo_path)
+
+        # Track this workspace as manually linked
+        if 'workspaces' not in config:
+            config['workspaces'] = {}
+        config['workspaces'][str(cwd)] = {
+            'linked_at': datetime.now().isoformat(),
+            'manual': True
+        }
+        write_config(config)
+
         print()
         print_success("Successfully linked to samantha-llm!")
         print()
@@ -650,6 +740,13 @@ def cmd_unlink(args):
     # Remove symlink
     try:
         symlink_path.unlink()
+
+        # Remove from workspace tracking
+        config = read_config()
+        if config and 'workspaces' in config and str(cwd) in config['workspaces']:
+            del config['workspaces'][str(cwd)]
+            write_config(config)
+
         print()
         print_success("Successfully unlinked!")
         print_info(f"  Removed: {symlink_path}")
@@ -657,6 +754,148 @@ def cmd_unlink(args):
     except Exception as e:
         print_error(f"Failed to remove symlink: {e}")
         return 1
+
+
+def cmd_setup(args):
+    """Setup command - configure agents"""
+    print_info("Samantha LLM Agent Setup")
+    print()
+
+    # Check if installed
+    config = read_config()
+    if not config:
+        print_error("samantha-llm is not installed")
+        print_info("Run 'samantha-llm install' first")
+        return 1
+
+    # Check if --default flag is used
+    if hasattr(args, 'default_agent') and args.default_agent:
+        # Just change default agent
+        agent_name = args.default_agent
+        if 'agents' not in config or agent_name not in config['agents']:
+            print_error(f"Agent '{agent_name}' is not configured")
+            print_info("Available agents: " + ', '.join(config.get('agents', {}).keys()))
+            return 1
+
+        config['default_agent'] = agent_name
+        if write_config(config):
+            print_success(f"Default agent set to: {agent_name}")
+            return 0
+        else:
+            return 1
+
+    # Interactive setup
+    print("Select your preferred Agentic LLM tool:")
+    print()
+    print("1) Claude Code")
+    print("2) Abacus.ai")
+    print("3) Other (manual setup)")
+    print()
+
+    choice = input("Enter your choice [1-3]: ").strip()
+
+    agent_config = None
+    agent_name = None
+
+    if choice == '1':
+        agent_name = 'claude'
+        agent_config = {
+            'command': 'npx claude',
+            'bootstrap_file': 'BOOTSTRAP_PROMPT.md'
+        }
+        print_info("Configuring Claude Code...")
+    elif choice == '2':
+        agent_name = 'abacus'
+        agent_config = {
+            'command': 'npx abacusai',
+            'bootstrap_file': 'BOOTSTRAP_PROMPT.md'
+        }
+        print_info("Configuring Abacus.ai...")
+    elif choice == '3':
+        print()
+        print_info("Manual agent setup")
+        agent_name = input("Enter agent name (e.g., 'myagent'): ").strip()
+        if not agent_name:
+            print_error("Agent name cannot be empty")
+            return 1
+
+        command = input("Enter command to run agent (e.g., 'npx myagent'): ").strip()
+        if not command:
+            print_error("Command cannot be empty")
+            return 1
+
+        bootstrap_file = input("Enter bootstrap file name [BOOTSTRAP_PROMPT.md]: ").strip()
+        if not bootstrap_file:
+            bootstrap_file = 'BOOTSTRAP_PROMPT.md'
+
+        agent_config = {
+            'command': command,
+            'bootstrap_file': bootstrap_file
+        }
+        print_info(f"Configuring {agent_name}...")
+    else:
+        print_error("Invalid choice")
+        return 1
+
+    # Add agent to config
+    if 'agents' not in config:
+        config['agents'] = {}
+
+    config['agents'][agent_name] = agent_config
+
+    # Set as default if it's the first agent or user confirms
+    if 'default_agent' not in config or not config.get('agents'):
+        config['default_agent'] = agent_name
+        print_info(f"Setting {agent_name} as default agent")
+    else:
+        print()
+        response = input(f"Set {agent_name} as default agent? [Y/n] ").strip().lower()
+        if response in ['', 'y', 'yes']:
+            config['default_agent'] = agent_name
+
+    # Save config
+    if write_config(config):
+        print()
+        print_success(f"Agent '{agent_name}' configured successfully!")
+        print_info(f"  Command: {agent_config['command']}")
+        print_info(f"  Bootstrap: {agent_config['bootstrap_file']}")
+        if config.get('default_agent') == agent_name:
+            print_info(f"  Default: Yes")
+        print()
+        print_info("You can now use 'samantha-llm start' to begin a session")
+        return 0
+    else:
+        return 1
+
+
+def cmd_agents(args):
+    """Agents command - list configured agents"""
+    config = read_config()
+    if not config:
+        print_error("samantha-llm is not installed")
+        print_info("Run 'samantha-llm install' first")
+        return 1
+
+    agents = config.get('agents', {})
+    default_agent = config.get('default_agent')
+
+    if not agents:
+        print_warning("No agents configured")
+        print_info("Run 'samantha-llm setup' to configure an agent")
+        return 0
+
+    print("Configured Agents:")
+    print("=" * 50)
+    print()
+
+    for name, agent_config in agents.items():
+        is_default = " (default)" if name == default_agent else ""
+        print(f"{name}{is_default}")
+        print(f"  Command: {agent_config.get('command', 'N/A')}")
+        print(f"  Bootstrap: {agent_config.get('bootstrap_file', 'N/A')}")
+        print()
+
+    return 0
 
 
 def main():
@@ -667,8 +906,10 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'help', 'version'],
                         help='Command to execute')
+    parser.add_argument('--default', dest='default_agent', metavar='AGENT',
+                        help='Set default agent (for setup command)')
 
     args = parser.parse_args()
 
@@ -678,6 +919,8 @@ def main():
         'status': cmd_status,
         'link': cmd_link,
         'unlink': cmd_unlink,
+        'setup': cmd_setup,
+        'agents': cmd_agents,
         'help': cmd_help,
         'version': cmd_version,
     }
