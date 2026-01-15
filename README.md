@@ -15,6 +15,12 @@ Each time a new LLM instance is instantiated, it reads these files and becomes S
 
 ## Installation
 
+We have easy to follow instructions using the `samantha-llm` command line tool.
+These instructions are here: https://samantha-llm.github.io/
+
+However, if you want to learn more in depth about how `samantha-llm` works
+behind the scenes, read on.
+
 ### Requirements
 
 - Python 3.8 or higher
