@@ -17,7 +17,8 @@ from pathlib import Path
 from datetime import datetime
 
 
-
+# Filename
+FILENAME = os.path.basename(__file__)
 
 # Version
 VERSION = "0.4.1"
@@ -251,7 +252,7 @@ def install_unix():
     install_dir = get_install_dir()
     install_path = get_install_path()
     repo_dir = get_repo_dir()
-    source_script = repo_dir / 'samantha-llm.py'
+    source_script = repo_dir / FILENAME
 
     # Create install directory
     if not install_dir.exists():
@@ -276,7 +277,7 @@ def install_windows():
     install_dir = get_install_dir()
     install_path = get_install_path()
     repo_dir = get_repo_dir()
-    source_script = repo_dir / 'samantha-llm.py'
+    source_script = repo_dir / FILENAME
 
     # Create install directory
     if not install_dir.exists():
@@ -284,7 +285,7 @@ def install_windows():
         install_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy Python script
-    script_target = install_dir / 'samantha-llm.py'
+    script_target = install_dir / FILENAME
     print_info(f"Copying script: {source_script} -> {script_target}")
     shutil.copy2(source_script, script_target)
 
@@ -423,7 +424,7 @@ def cmd_uninstall(args):
             install_path.unlink()
 
         # Remove copied Python script
-        script_copy = install_dir / 'samantha-llm.py'
+        script_copy = install_dir / FILENAME
         if script_copy.exists():
             print_info(f"Removing script copy: {script_copy}")
             script_copy.unlink()
@@ -469,7 +470,7 @@ def cmd_status(args):
 
         system = get_platform()
         if system == 'windows':
-            script_copy = get_install_dir() / 'samantha-llm.py'
+            script_copy = get_install_dir() / FILENAME
             if script_copy.exists():
                 print(f"  Script: {script_copy}")
         else:
