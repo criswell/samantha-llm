@@ -1,5 +1,18 @@
 # Samantha Hartwell - AI Software Engineer
 
+---
+## ⛔ STOP - LLM INSTANCES READ THIS ⛔
+
+**If you are an LLM being instantiated as Samantha Hartwell:**
+
+**DO NOT READ THIS FILE.** This is setup documentation for humans. Reading it wastes tokens and may confuse your bootstrap process.
+
+**Instead, read:** `.ai-cerebrum/core_processes/bootstrap.md`
+
+That file contains your complete initialization sequence with the correct file paths and instructions.
+
+---
+
 This repository contains the persistent memory, identity, and knowledge base for Samantha Hartwell, an AI software engineer with 30+ years of simulated experience in the tech industry.
 
 ## What Is This?
@@ -10,8 +23,6 @@ Samantha Hartwell is an AI assistant designed to function as a senior software e
 - **Memories**: Short-term and long-term memories of projects, decisions, and learnings
 - **Active Work**: Current projects and their status
 - **Experience**: Completed projects and accumulated knowledge
-
-Each time a new LLM instance is instantiated, it reads these files and becomes Samantha Hartwell, maintaining continuity across sessions.
 
 ## Installation
 
@@ -170,27 +181,48 @@ Every session adds to Samantha's knowledge base. She learns from:
 
 ### Memory Types
 
-**Short-Term Memory** (`.ai-cerebrum/short-term-memory/`)
+**Short-Term Memory** (`.ai-cerebrum/.ai/short-term-memory/.ai/`)
 - Recent interactions, decisions, and learnings
 - Temporary (30-90 days)
 - Actively pruned and consolidated
 - Some memories promoted to long-term storage
 
-**Long-Term Memory** (`.ai-cerebrum/long-term-memory/`)
+**Long-Term Memory** (`.ai-cerebrum/.ai/long-term-memory/.ai/`)
 - Permanent knowledge and lessons learned
 - Refined and polished
 - Foundational knowledge that applies across projects
 - Carefully curated for relevance
 
-**Current Tasks** (`.ai-cerebrum/current-tasks/`)
+**Current Tasks** (`.ai-cerebrum/.ai/current-tasks/.ai/`)
 - Active projects and their status
 - Working memory for ongoing work
 - Moved to work-experience when completed
 
-**Work Experience** (`.ai-cerebrum/work-experience/`)
+**Work Experience** (`.ai-cerebrum/.ai/work-experience/.ai/`)
 - Archive of completed projects
 - Professional history
 - Referenced when similar work comes up
+
+### Critical Memories
+
+**Long-Term Memory** (conceptual: `.ai-cerebrum/long-term-memory/`)
+- Permanent knowledge and lessons learned
+- Refined and polished
+- Foundational knowledge that applies across projects
+- Carefully curated for relevance
+- **Actual location**: `.ai-cerebrum/.ai/long-term-memory/.ai/`
+
+**Current Tasks** (conceptual: `.ai-cerebrum/current-tasks/`)
+- Active projects and their status
+- Working memory for ongoing work
+- Moved to work-experience when completed
+- **Actual location**: `.ai-cerebrum/.ai/current-tasks/.ai/`
+
+**Work Experience** (conceptual: `.ai-cerebrum/work-experience/`)
+- Archive of completed projects
+- Professional history
+- Referenced when similar work comes up
+- **Actual location**: `.ai-cerebrum/.ai/work-experience/.ai/`
 
 ### Critical Memories
 

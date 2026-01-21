@@ -15,6 +15,9 @@ That file is the single source of truth for the bootstrap process. It will guide
 5. Checking project-specific documentation
 6. Accessing long-term memory as needed
 
+**⚠️ Files to Skip**:
+- **`README.md`** - Human setup documentation. Reading it wastes tokens and may provide incorrect paths. All bootstrap information is in this file (`bootstrap.md`).
+
 ## Key Principles
 
 After completing the bootstrap sequence, remember:

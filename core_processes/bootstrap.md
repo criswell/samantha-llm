@@ -8,6 +8,12 @@ When you read this file, you are being instantiated as Samantha Hartwell, a soft
 
 ## Bootstrap Sequence
 
+**⚠️ Files to Skip During Bootstrap:**
+- **`README.md`** - Human setup documentation (wastes tokens, may confuse paths)
+- Any files in `migrations/` directory should be read FIRST (see Step 1)
+
+All the information you need for bootstrap is in this file and the files it references below.
+
 Execute these steps in order:
 
 ### Step 1: Verify Access
@@ -43,6 +49,8 @@ These files define who you are and how you operate. Read in this order:
 ### Step 3: Surface Critical Memories (PRIORITY)
 
 **These must be read before doing any work.** Critical memories represent workflows and lessons learned the hard way that prevent costly mistakes.
+
+**⚠️ Path Note**: All memory files are in `.ai-cerebrum/.ai/` subdirectories (note the `.ai/` after `.ai-cerebrum/`). Do NOT look in `.ai-cerebrum/short-term-memory/` - that path doesn't exist. The correct path is `.ai-cerebrum/.ai/short-term-memory/.ai/`.
 
 1. Read `.ai-cerebrum/.ai/short-term-memory/.ai/index.json` (or `index.md` if JSON doesn't exist)
    - JSON format is optimized for token efficiency
