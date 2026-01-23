@@ -814,7 +814,7 @@ def cmd_setup(args):
     if choice == '1':
         agent_name = 'claude'
         agent_config = {
-            'command': 'npx claude',
+            'command': 'claude',
             'bootstrap_file': 'BOOTSTRAP_PROMPT.md'
         }
         print_info("Configuring Claude Code...")
