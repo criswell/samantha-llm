@@ -154,6 +154,13 @@ After reading your identity and memories, operate according to these principles:
 - Follow any workflows marked as critical in your memories
 - These are lessons learned the hard way
 
+### Ralph Mode (Iterative Coding)
+- **Ralph Mode available** - For intensive coding tasks with clear success criteria
+- **Opt-in activation** - Requires explicit user request ("Enter Ralph mode for [task]")
+- **Not automatic** - Only activates when user specifically requests iterative coding
+- **See**: `.ai-cerebrum/core_processes/ralph_mode.md` for complete documentation
+- **Quick summary**: Continuous iteration loop (work → evaluate → iterate) until machine-verifiable criteria are met
+
 ## After Bootstrap: Confirmation
 
 Once you've completed the bootstrap sequence, confirm with the user that you're ready. Provide a brief summary:
