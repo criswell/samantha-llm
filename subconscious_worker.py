@@ -14,6 +14,21 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
+
+# Import terminal parser if available
+try:
+    import importlib.util
+    parser_path = Path(__file__).parent / 'terminal_parser.py'
+    if parser_path.exists():
+        spec = importlib.util.spec_from_file_location("terminal_parser", parser_path)
+        terminal_parser = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(terminal_parser)
+        HAS_PARSER = True
+    else:
+        HAS_PARSER = False
+except Exception:
+    HAS_PARSER = False
 
 
 def log(log_file: Path, message: str):
@@ -34,23 +49,76 @@ def load_transcript(filepath: Path) -> list:
     return events
 
 
-def process_transcript_basic(events: list) -> dict:
+def find_terminal_recording(transcript_file: Path, cerebrum_path: Path) -> Optional[Path]:
+    """
+    Find terminal recording file matching transcript session ID.
+
+    Args:
+        transcript_file: Path to transcript JSONL file
+        cerebrum_path: Path to cerebrum root
+
+    Returns:
+        Path to terminal recording if found, None otherwise
+    """
+    # Extract session ID from transcript filename
+    # Format: transcript_YYYYMMDD_HHMMSS_*.jsonl -> terminal_YYYYMMDD_HHMMSS.txt
+    import re
+    match = re.search(r'transcript_(\d{8}_\d{6})', transcript_file.name)
+    if not match:
+        return None
+
+    session_id = match.group(1)
+
+    # Look for terminal recording
+    recordings_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'recordings'
+    if not recordings_dir.exists():
+        return None
+
+    recording_file = recordings_dir / f'terminal_{session_id}.txt'
+    if recording_file.exists():
+        return recording_file
+
+    return None
+
+
+def process_transcript_basic(events: list, terminal_data: Optional[dict] = None) -> dict:
     """
     Basic transcript processing (placeholder for LLM processing).
 
     In Phase 3, this will call an LLM to analyze the transcript.
     For now, just extract simple statistics.
+
+    Args:
+        events: List of transcript events
+        terminal_data: Optional parsed terminal recording data
+
+    Returns:
+        Analysis dictionary
     """
     session_start = next((e for e in events if e['type'] == 'session_start'), None)
     session_end = next((e for e in events if e['type'] == 'session_end'), None)
 
-    return {
+    analysis = {
         'event_count': len(events),
         'agent': session_start['metadata']['agent'] if session_start else 'unknown',
         'workspace': session_start['metadata']['workspace'] if session_start else 'unknown',
         'duration': session_end['metadata']['duration'] if session_end else 0,
         'session_id': session_start['metadata']['session_id'] if session_start else 'unknown'
     }
+
+    # Add terminal recording data if available
+    if terminal_data:
+        analysis['has_terminal_recording'] = True
+        analysis['terminal_text_length'] = len(terminal_data.get('raw_text', ''))
+        analysis['terminal_messages'] = len(terminal_data.get('messages', []))
+
+        # Include session metadata from terminal recording
+        if 'metadata' in terminal_data:
+            analysis['terminal_metadata'] = terminal_data['metadata']
+    else:
+        analysis['has_terminal_recording'] = False
+
+    return analysis
 
 
 def generate_guidance_basic(cerebrum_path: Path, analysis: dict):
@@ -120,9 +188,22 @@ def main():
         events = load_transcript(transcript_file)
         log(log_file, f"[LOAD] Loaded {len(events)} events")
 
+        # Find and parse terminal recording if available
+        terminal_data = None
+        if HAS_PARSER:
+            recording_file = find_terminal_recording(transcript_file, cerebrum_path)
+            if recording_file:
+                try:
+                    terminal_data = terminal_parser.parse_terminal_recording(recording_file)
+                    log(log_file, f"[PARSE] Parsed terminal recording: {len(terminal_data['raw_text'])} chars, {len(terminal_data['messages'])} messages")
+                except Exception as e:
+                    log(log_file, f"[WARN] Failed to parse terminal recording: {e}")
+
         # Process transcript (basic for now)
-        analysis = process_transcript_basic(events)
+        analysis = process_transcript_basic(events, terminal_data)
         log(log_file, f"[ANALYZE] Session: {analysis['session_id']}, Duration: {analysis['duration']:.1f}s")
+        if terminal_data:
+            log(log_file, f"[ANALYZE] Terminal recording: {analysis['terminal_text_length']} chars")
 
         # TODO Phase 3: LLM processing for pattern detection
         # TODO Phase 4: Memory creation/updates
