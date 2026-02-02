@@ -1,5 +1,3 @@
-# Largely lifted from dox-pytest 11/28/23. We probably ought to go through and
-# audit this list
 *.pyc
 *.pyo
 *.tar.gz
@@ -26,6 +24,9 @@ Session.vim
 coverage.xml
 test-results/
 *.ai/
+.ai-cerebrum
+.claude/
+test_recursive_session.py
 
 # Files to include regardless of exclusion rules
 !**/.gitkeep

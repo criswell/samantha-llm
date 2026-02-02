@@ -1150,6 +1150,108 @@ def spawn_subconscious_worker(transcript_file: Path, cerebrum_path: Path):
 
 
 # ============================================================================
+# Terminal Recording
+# ============================================================================
+
+def run_agent_with_recording(
+    agent_command: list,
+    cwd: Path,
+    recording_file: Path
+) -> int:
+    """
+    Run agent command with terminal recording.
+
+    Uses platform-specific terminal recording to capture all I/O.
+
+    Args:
+        agent_command: Command to execute (as list)
+        cwd: Working directory
+        recording_file: Path to save terminal recording
+
+    Returns:
+        Exit code from agent
+    """
+    system = get_platform()
+
+    if system == 'windows':
+        # Windows: Use PowerShell Start-Transcript
+        # Note: This captures PowerShell output, not raw terminal
+        ps_command = f"""
+Start-Transcript -Path '{recording_file}' -Force
+try {{
+    & {' '.join(f'"{part}"' if ' ' in part else part for part in agent_command)}
+    exit $LASTEXITCODE
+}} finally {{
+    Stop-Transcript
+}}
+"""
+        cmd = ['powershell', '-NoProfile', '-Command', ps_command]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            return result.returncode
+        except Exception as e:
+            print_error(f"Failed to execute agent with recording: {e}")
+            return 1
+
+    else:
+        # Unix/Mac: Use 'script' command
+        # -q: Quiet (no start/done messages)
+        # -F: Flush output after each write
+        # -c: Command to run
+
+        # Build command string for script
+        import shlex
+        cmd_string = ' '.join(shlex.quote(part) for part in agent_command)
+
+        cmd = [
+            'script',
+            '-q',           # Quiet mode
+            '-F',           # Flush output
+            str(recording_file),
+            '-c',
+            cmd_string
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            return result.returncode
+        except FileNotFoundError:
+            print_error("'script' command not found")
+            print_info("Terminal recording requires 'script' (usually in util-linux package)")
+            print_info("Falling back to execution without recording...")
+
+            # Fallback: run without recording
+            try:
+                result = subprocess.run(
+                    agent_command,
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                    cwd=str(cwd)
+                )
+                return result.returncode
+            except Exception as e:
+                print_error(f"Failed to execute agent: {e}")
+                return 1
+        except Exception as e:
+            print_error(f"Failed to execute agent with recording: {e}")
+            return 1
+
+
+# ============================================================================
 # Session Commands
 # ============================================================================
 
@@ -1285,34 +1387,47 @@ def cmd_start(args):
     cmd_parts = shlex.split(agent_command)
     cmd_parts.append(bootstrap_content)
 
+    # Create terminal recording file
+    import tempfile
+    recording_file = None
+    if has_transcript:
+        # Store recording next to transcript for processing
+        temp_dir = tempfile.gettempdir()
+        session_id = transcript.session_id if transcript else datetime.now().strftime("%Y%m%d_%H%M%S")
+        recording_file = Path(temp_dir) / f'terminal_{session_id}.txt'
+
     print()
     print_info(f"Starting Samantha Hartwell session with agent '{agent_name}'")
     print_info(f"  Workspace: {cwd}")
     print_info(f"  Command: {agent_command}")
     if has_transcript:
-        print_info(f"  Transcript: Capturing (subconscious enabled)")
+        print_info(f"  Transcript: Capturing conversation (subconscious enabled)")
     print()
 
     # Record session start time
     session_start_time = time.time()
 
-    # Execute agent command with bootstrap content
-    try:
-        result = subprocess.run(
-            cmd_parts,
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            cwd=str(cwd)
-        )
-        exit_code = result.returncode
-    except FileNotFoundError:
-        print_error(f"Agent command not found: {agent_command}")
-        print_info("Make sure the agent is installed and in your PATH")
-        exit_code = 127
-    except Exception as e:
-        print_error(f"Failed to execute agent: {e}")
-        exit_code = 1
+    # Execute agent command with terminal recording
+    if recording_file:
+        exit_code = run_agent_with_recording(cmd_parts, cwd, recording_file)
+    else:
+        # Fallback: run without recording
+        try:
+            result = subprocess.run(
+                cmd_parts,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            exit_code = result.returncode
+        except FileNotFoundError:
+            print_error(f"Agent command not found: {agent_command}")
+            print_info("Make sure the agent is installed and in your PATH")
+            exit_code = 127
+        except Exception as e:
+            print_error(f"Failed to execute agent: {e}")
+            exit_code = 1
 
     # Record session end and spawn worker
     if has_transcript and transcript:
@@ -1327,8 +1442,22 @@ def cmd_start(args):
                 repo_path
             )
 
-            print()
-            print_info("📝 Session transcript saved")
+            # Save terminal recording to cerebrum if it exists
+            if recording_file and recording_file.exists():
+                # Create recordings directory
+                recordings_dir = repo_path / '.ai' / 'subconscious' / '.ai' / 'recordings'
+                recordings_dir.mkdir(parents=True, exist_ok=True)
+
+                # Move recording to cerebrum
+                target_recording = recordings_dir / recording_file.name
+                shutil.move(str(recording_file), str(target_recording))
+
+                print()
+                print_info("📝 Session transcript saved")
+                print_info("📼 Terminal recording saved")
+            else:
+                print()
+                print_info("📝 Session transcript saved")
 
             # Spawn subconscious worker
             spawn_subconscious_worker(saved_transcript, repo_path)

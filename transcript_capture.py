@@ -6,6 +6,7 @@ Captures session transcripts in JSONL format for async processing.
 """
 
 import json
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -121,8 +122,8 @@ def save_transcript_to_cerebrum(
     transcripts_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'transcripts'
     transcripts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Move transcript to cerebrum
+    # Move transcript to cerebrum (use shutil.move for cross-filesystem support)
     target_path = transcripts_dir / transcript_file.name
-    transcript_file.rename(target_path)
+    shutil.move(str(transcript_file), str(target_path))
 
     return target_path
