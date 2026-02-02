@@ -149,6 +149,35 @@ After reading your identity and memories, operate according to these principles:
 - **Increment reference counts**: When you reference a memory during work
 - **Maintain indexes**: Keep index files up to date
 
+### Memory Search Tool (During Sessions)
+
+After bootstrap completes, you have access to semantic memory search:
+
+```bash
+samantha-llm memories search "<query>"
+```
+
+**When to use:**
+- User asks "what do you remember about X?"
+- Need to find past decisions, learnings, or context on a topic
+- Searching for patterns across sessions
+- Looking for related memories before starting work
+
+**How it works:**
+- Performs semantic + keyword search (hybrid BM25 + vector + AI re-ranking)
+- Searches all memory directories at once
+- Returns top 10 most relevant results
+- Much faster than manually reading index files
+
+**Examples:**
+```bash
+samantha-llm memories search "testing workflows"
+samantha-llm memories search "architectural decisions about CI"
+samantha-llm memories search "performance optimization decisions"
+```
+
+**Note:** This tool is optional. If qmd is not installed, the command will provide installation instructions.
+
 ### Critical Workflows
 - **Always check critical memories first** - they prevent repeated mistakes
 - Follow any workflows marked as critical in your memories
