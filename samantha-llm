@@ -1088,9 +1088,39 @@ def is_bun_installed():
     return is_command_available('bun')
 
 
+def get_qmd_local_dir():
+    """Get local qmd installation directory"""
+    return Path.home() / '.local' / 'share' / 'samantha-llm' / 'qmd'
+
+
+def get_qmd_bin_path():
+    """Get path to qmd binary (global or local)"""
+    # Check global install first
+    global_bin = shutil.which('qmd')
+    if global_bin:
+        return global_bin
+
+    # Check bun global install (~/node_modules/qmd/qmd)
+    bun_global = Path.home() / 'node_modules' / 'qmd' / 'qmd'
+    if bun_global.exists() and os.access(bun_global, os.X_OK):
+        return str(bun_global)
+
+    # Check local install
+    local_bin = get_qmd_local_dir() / 'node_modules' / 'qmd' / 'qmd'
+    if local_bin.exists() and os.access(local_bin, os.X_OK):
+        return str(local_bin)
+
+    # Also check .bin directories
+    local_bin_dir = get_qmd_local_dir() / 'node_modules' / '.bin' / 'qmd'
+    if local_bin_dir.exists() and os.access(local_bin_dir, os.X_OK):
+        return str(local_bin_dir)
+
+    return None
+
+
 def is_qmd_installed():
-    """Check if qmd is installed"""
-    return is_command_available('qmd')
+    """Check if qmd is installed (global or local)"""
+    return get_qmd_bin_path() is not None
 
 
 def get_qmd_models_dir():
@@ -1152,57 +1182,91 @@ def install_bun():
 
 
 def install_qmd():
-    """Install qmd via Bun"""
-    print_info("Installing qmd...")
+    """Install qmd via Bun (try global first, fall back to local)"""
+    print_info("Installing qmd from github:tobi/qmd...")
 
     if not is_bun_installed():
         print_error("Bun is not installed. Install Bun first with: samantha-llm qmd install-bun")
         return False
 
+    install_type = None
+
+    # Try global install first
+    print_info("Attempting global install...")
     try:
         result = subprocess.run(
-            ['bun', 'install', '-g', 'qmd'],
+            ['bun', 'install', '-g', 'github:tobi/qmd'],
             capture_output=True,
             text=True
         )
 
-        if result.returncode != 0:
-            print_error(f"qmd installation failed: {result.stderr}")
-            return False
-
-        print_success("qmd installed successfully")
-
-        # Check if qmd is now available
-        if not is_qmd_installed():
-            print_warning("qmd installed but not found in PATH")
-            print_info("You may need to add Bun's global bin directory to PATH")
-            return False
-
-        # Create config file
-        config_file = get_qmd_config_file()
-        config_dir = get_config_dir()
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-        qmd_config = {
-            "enabled": True,
-            "auto_index": True,
-            "search_mode": "hybrid",
-            "models_path": str(get_qmd_models_dir())
-        }
-
-        with open(config_file, 'w') as f:
-            json.dump(qmd_config, f, indent=2)
-
-        print_success(f"Created qmd config: {config_file}")
-        print()
-        print_info("qmd will auto-download models (~2GB) on first use")
-        print_info(f"Models will be cached in: {get_qmd_models_dir()}")
-
-        return True
+        if result.returncode == 0:
+            print_success("Global install successful")
+            install_type = "global"
+        else:
+            print_warning(f"Global install failed: {result.stderr.strip()}")
+            print_info("Falling back to local install...")
 
     except Exception as e:
-        print_error(f"Failed to install qmd: {e}")
+        print_warning(f"Global install failed: {e}")
+        print_info("Falling back to local install...")
+
+    # Try local install if global failed
+    if install_type is None:
+        local_dir = get_qmd_local_dir()
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            result = subprocess.run(
+                ['bun', 'install', 'github:tobi/qmd'],
+                cwd=str(local_dir),
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                print_error(f"Local install failed: {result.stderr}")
+                return False
+
+            print_success(f"Local install successful: {local_dir}")
+            install_type = "local"
+
+        except Exception as e:
+            print_error(f"Failed to install qmd: {e}")
+            return False
+
+    # Check if qmd is now available
+    qmd_bin = get_qmd_bin_path()
+    if not qmd_bin:
+        print_error("qmd installed but binary not found")
+        print_info("Try running: samantha-llm qmd status")
         return False
+
+    print_success(f"qmd binary: {qmd_bin}")
+
+    # Create config file
+    config_file = get_qmd_config_file()
+    config_dir = get_config_dir()
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    qmd_config = {
+        "enabled": True,
+        "auto_index": True,
+        "search_mode": "hybrid",
+        "models_path": str(get_qmd_models_dir()),
+        "install_type": install_type,
+        "bin_path": qmd_bin
+    }
+
+    with open(config_file, 'w') as f:
+        json.dump(qmd_config, f, indent=2)
+
+    print_success(f"Created qmd config: {config_file}")
+    print()
+    print_info("qmd will auto-download models (~2GB) on first use")
+    print_info(f"Models will be cached in: {get_qmd_models_dir()}")
+
+    return True
 
 
 def cmd_qmd(args):
@@ -1265,13 +1329,15 @@ def cmd_qmd(args):
             print_info("  Install with: samantha-llm qmd install-bun")
 
         # Check qmd
-        if is_qmd_installed():
+        qmd_bin = get_qmd_bin_path()
+        if qmd_bin:
             try:
-                result = subprocess.run(['qmd', '--version'], capture_output=True, text=True)
+                result = subprocess.run([qmd_bin, '--version'], capture_output=True, text=True)
                 version = result.stdout.strip() if result.stdout else 'unknown'
                 print_success(f"qmd: Installed (version {version})")
+                print_info(f"  Binary: {qmd_bin}")
             except:
-                print_success("qmd: Installed")
+                print_success(f"qmd: Installed at {qmd_bin}")
 
             # Check for models
             models_dir = get_qmd_models_dir()
@@ -1371,25 +1437,37 @@ def index_cerebrum():
         print_info(f"  {d.name}: {file_count} files")
     print()
 
-    # Create qmd collection
+    # Get qmd binary path
+    qmd_bin = get_qmd_bin_path()
+    if not qmd_bin:
+        print_error("qmd is not installed")
+        print_info("Install with: samantha-llm qmd install")
+        return False
+
     collection_name = "samantha-cerebrum"
 
-    # Build qmd command
-    # qmd index <collection> <path1> <path2> ...
-    cmd = ['qmd', 'index', collection_name]
-    for d in existing_dirs:
-        cmd.append(str(d))
+    print_info(f"Creating/updating collection: {collection_name}")
+    print()
 
-    # Add context metadata to help qmd understand the files
-    cmd.extend([
-        '--context',
-        'Personal memory system for Samantha Hartwell, an AI software engineer. Contains memories of past work, technical decisions, and ongoing projects.'
-    ])
+    # Remove existing collection if it exists
+    try:
+        remove_cmd = [qmd_bin, 'collection', 'remove', collection_name]
+        subprocess.run(remove_cmd, capture_output=True, text=True)
+        print_info("Removed existing collection")
+    except:
+        pass  # Collection might not exist yet
 
-    print_info(f"Creating collection: {collection_name}")
-    print_info(f"Indexing {len(existing_dirs)} directories...")
+    # Index the cerebrum .ai directory once (recursive)
+    cerebrum = get_cerebrum_path()
+    cerebrum_ai = cerebrum / '.ai'
+
+    print_info(f"Indexing cerebrum directory...")
+    print_info(f"  Path: {cerebrum_ai}")
+    print_info(f"  Files: {len(list(cerebrum_ai.rglob('*.md')))} markdown files")
+    print()
 
     try:
+        cmd = [qmd_bin, 'collection', 'add', str(cerebrum_ai), '--name', collection_name, '--mask', '**/*.md']
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -1397,31 +1475,38 @@ def index_cerebrum():
         )
 
         if result.returncode != 0:
-            print_error(f"Indexing failed: {result.stderr}")
+            print_error(f"Indexing failed: {result.stderr.strip()}")
             return False
 
-        # Parse output to show progress
-        if result.stdout:
-            print()
-            print_info("Indexing output:")
-            for line in result.stdout.strip().split('\n'):
-                if line.strip():
-                    print(f"  {line}")
-
-        print()
-        print_success(f"Cerebrum indexed successfully!")
-        print_info(f"Collection: {collection_name}")
-
-        return True
+        print_success("Indexed cerebrum successfully!")
 
     except Exception as e:
         print_error(f"Indexing failed: {e}")
         return False
 
+    # Add context for the collection
+    try:
+        context_cmd = [
+            qmd_bin, 'context', 'add', '/',
+            'Personal memory system for Samantha Hartwell, an AI software engineer. Contains memories of past work, technical decisions, and ongoing projects.'
+        ]
+        subprocess.run(context_cmd, capture_output=True, text=True)
+        print_info("Added context metadata")
+    except:
+        pass  # Context is optional
+
+    print()
+    print_success("Cerebrum indexing complete!")
+    print_info(f"Collection: {collection_name}")
+    print_info("Use: samantha-llm memories search \"<query>\"")
+
+    return True
+
 
 def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filters=None):
     """Search memories using qmd"""
-    if not is_qmd_installed():
+    qmd_bin = get_qmd_bin_path()
+    if not qmd_bin:
         print_error("qmd is not installed")
         print_info("Install with: samantha-llm qmd install")
         return False
@@ -1430,14 +1515,17 @@ def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filt
 
     # Build qmd command based on mode
     if mode == 'keyword':
-        cmd = ['qmd', 'search', collection_name, query]
+        cmd = [qmd_bin, 'search', query]
     elif mode == 'semantic':
-        cmd = ['qmd', 'vsearch', collection_name, query]
+        cmd = [qmd_bin, 'vsearch', query]
     else:  # hybrid (default)
-        cmd = ['qmd', 'query', collection_name, query]
+        cmd = [qmd_bin, 'query', query]
+
+    # Add collection filter
+    cmd.extend(['-c', collection_name])
 
     # Add limit
-    cmd.extend(['--limit', str(limit)])
+    cmd.extend(['-n', str(limit)])
 
     # Add format
     if format_type == 'json':
