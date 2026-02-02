@@ -574,6 +574,7 @@ Usage:
     samantha-llm qmd install       Install qmd (memory search engine) and dependencies
     samantha-llm qmd status        Show qmd installation status
     samantha-llm qmd check         Quick check if qmd is available
+    samantha-llm memories index    Index cerebrum files for semantic search
     samantha-llm status            Show installation status and configuration
     samantha-llm version           Show version information
     samantha-llm help              Show this help message
@@ -1320,6 +1321,135 @@ def cmd_qmd(args):
         return 1
 
 
+# ============================================================================
+# Memory Commands
+# ============================================================================
+
+def get_cerebrum_path():
+    """Get path to cerebrum (samantha-llm repo)"""
+    return get_repo_dir()
+
+
+def get_memory_directories():
+    """Get list of memory directories to index"""
+    cerebrum = get_cerebrum_path()
+    return [
+        cerebrum / '.ai' / 'short-term-memory' / '.ai',
+        cerebrum / '.ai' / 'long-term-memory' / '.ai',
+        cerebrum / '.ai' / 'current-tasks' / '.ai',
+        cerebrum / '.ai' / 'work-experience' / '.ai',
+    ]
+
+
+def index_cerebrum():
+    """Index cerebrum files with qmd"""
+    if not is_qmd_installed():
+        print_error("qmd is not installed")
+        print_info("Install with: samantha-llm qmd install")
+        return False
+
+    print_info("Indexing cerebrum files...")
+    print()
+
+    # Get memory directories
+    memory_dirs = get_memory_directories()
+
+    # Check which directories exist
+    existing_dirs = [d for d in memory_dirs if d.exists()]
+
+    if not existing_dirs:
+        print_warning("No memory directories found")
+        print_info("Memory directories checked:")
+        for d in memory_dirs:
+            print_info(f"  {d}")
+        return False
+
+    print_info(f"Found {len(existing_dirs)} memory directories:")
+    for d in existing_dirs:
+        file_count = len(list(d.glob('*.md')))
+        print_info(f"  {d.name}: {file_count} files")
+    print()
+
+    # Create qmd collection
+    collection_name = "samantha-cerebrum"
+
+    # Build qmd command
+    # qmd index <collection> <path1> <path2> ...
+    cmd = ['qmd', 'index', collection_name]
+    for d in existing_dirs:
+        cmd.append(str(d))
+
+    # Add context metadata to help qmd understand the files
+    cmd.extend([
+        '--context',
+        'Personal memory system for Samantha Hartwell, an AI software engineer. Contains memories of past work, technical decisions, and ongoing projects.'
+    ])
+
+    print_info(f"Creating collection: {collection_name}")
+    print_info(f"Indexing {len(existing_dirs)} directories...")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            print_error(f"Indexing failed: {result.stderr}")
+            return False
+
+        # Parse output to show progress
+        if result.stdout:
+            print()
+            print_info("Indexing output:")
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    print(f"  {line}")
+
+        print()
+        print_success(f"Cerebrum indexed successfully!")
+        print_info(f"Collection: {collection_name}")
+
+        return True
+
+    except Exception as e:
+        print_error(f"Indexing failed: {e}")
+        return False
+
+
+def cmd_memories(args):
+    """Handle memory commands"""
+    subcommand = args.subcommand or 'help'
+
+    if subcommand == 'index':
+        # Index cerebrum files
+        if index_cerebrum():
+            print()
+            print_info("Next steps:")
+            print_info("  - Search memories: samantha-llm memories search <query>")
+            print_info("  - Check status: qmd list samantha-cerebrum")
+            return 0
+        return 1
+
+    elif subcommand == 'help' or subcommand not in ['index']:
+        # Show help
+        print_info("Memory management commands:")
+        print()
+        print_info("  samantha-llm memories index    - Index cerebrum files for searching")
+        print()
+        print_info("Coming soon:")
+        print_info("  samantha-llm memories search   - Search memories with qmd")
+        print()
+        print_info("Example:")
+        print_info("  samantha-llm memories index")
+        return 0
+
+    else:
+        print_error(f"Unknown memories subcommand: {subcommand}")
+        return 1
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -1328,7 +1458,7 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'help', 'version'],
                         help='Command to execute')
     parser.add_argument('subcommand', nargs='?', default=None,
                         help='Subcommand (for qmd command)')
@@ -1349,6 +1479,7 @@ def main():
         'agents': cmd_agents,
         'start': cmd_start,
         'qmd': cmd_qmd,
+        'memories': cmd_memories,
         'help': cmd_help,
         'version': cmd_version,
     }
