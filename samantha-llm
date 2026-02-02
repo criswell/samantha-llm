@@ -1203,8 +1203,8 @@ try {{
     else:
         # Unix/Mac: Use 'script' command
         # -q: Quiet (no start/done messages)
-        # -F: Flush output after each write
         # -c: Command to run
+        # Note: -f/--flush flag varies by version, so we omit it
 
         # Build command string for script
         import shlex
@@ -1212,11 +1212,10 @@ try {{
 
         cmd = [
             'script',
-            '-q',           # Quiet mode
-            '-F',           # Flush output
-            str(recording_file),
+            '-q',           # Quiet mode (widely supported)
             '-c',
-            cmd_string
+            cmd_string,
+            str(recording_file)
         ]
 
         try:
