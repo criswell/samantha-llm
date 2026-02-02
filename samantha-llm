@@ -13,6 +13,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -558,6 +559,93 @@ def cmd_status(args):
     return 0
 
 
+def cmd_subconscious(args):
+    """Subconscious command - view subconscious status and guidance"""
+    config = read_config()
+    if not config or 'repo_path' not in config:
+        print_error("samantha-llm is not installed")
+        print_info("Run 'samantha-llm install' first")
+        return 1
+
+    repo_path = Path(config['repo_path'])
+    subconscious_dir = repo_path / '.ai' / 'subconscious' / '.ai'
+
+    # Handle subcommands
+    if hasattr(args, 'subcommand') and args.subcommand:
+        subcommand = args.subcommand
+    else:
+        # Default: show status
+        subcommand = 'status'
+
+    if subcommand == 'status':
+        # Show subconscious status
+        print("Subconscious Status:")
+        print("=" * 50)
+        print()
+
+        # Check if worker is running
+        is_running, estimated_remaining = check_worker_running(repo_path)
+        if is_running:
+            print_warning(f"Worker running (~{estimated_remaining}s remaining)")
+        else:
+            print_success("No worker running")
+
+        # Check for guidance file
+        guidance_file = subconscious_dir / 'guidance.md'
+        if guidance_file.exists():
+            print_info(f"Guidance file: {guidance_file}")
+            print_info(f"  Last updated: {datetime.fromtimestamp(guidance_file.stat().st_mtime)}")
+        else:
+            print_info("No guidance file yet")
+
+        # Check processing log
+        log_file = subconscious_dir / 'processing.log'
+        if log_file.exists():
+            # Show last few log entries
+            with open(log_file) as f:
+                lines = f.readlines()
+                if lines:
+                    print()
+                    print_info("Recent processing activity:")
+                    for line in lines[-5:]:
+                        print(f"  {line.rstrip()}")
+
+        print()
+        return 0
+
+    elif subcommand == 'guidance':
+        # Show guidance file
+        guidance_file = subconscious_dir / 'guidance.md'
+        if not guidance_file.exists():
+            print_warning("No guidance file found")
+            print_info("Guidance will be generated after your first session")
+            return 0
+
+        print("Subconscious Guidance:")
+        print("=" * 50)
+        print()
+        with open(guidance_file) as f:
+            print(f.read())
+        return 0
+
+    elif subcommand == 'wait':
+        # Wait for worker to finish
+        is_running, _ = check_worker_running(repo_path)
+        if not is_running:
+            print_info("No worker running")
+            return 0
+
+        print_info("Waiting for worker to finish...")
+        wait_for_worker(repo_path, timeout=60)
+        print_success("Worker finished")
+        return 0
+
+    else:
+        print_error(f"Unknown subcommand: {subcommand}")
+        print_info("Available subcommands: status, guidance, wait")
+        return 1
+
+
 def cmd_help(args):
     """Help command"""
     print("""samantha-llm - Samantha Hartwell LLM Management Tool
@@ -924,6 +1012,147 @@ def cmd_agents(args):
     return 0
 
 
+# ============================================================================
+# Subconscious Worker Functions
+# ============================================================================
+
+def get_lockfile_path(repo_path: Path) -> Path:
+    """Get path to subconscious worker lock file."""
+    return repo_path / '.ai' / 'subconscious' / '.ai' / '.processing.lock'
+
+
+def check_worker_running(repo_path: Path) -> tuple:
+    """
+    Check if subconscious worker is running.
+
+    Returns:
+        (is_running, estimated_seconds_remaining)
+    """
+    lockfile = get_lockfile_path(repo_path)
+
+    if not lockfile.exists():
+        return (False, 0)
+
+    # Estimate time remaining based on lock file age
+    elapsed = time.time() - lockfile.stat().st_mtime
+    estimated_remaining = max(0, 30 - elapsed)  # Assume 30 second processing time
+
+    return (True, int(estimated_remaining))
+
+
+def wait_for_worker(repo_path: Path, timeout: int = 60):
+    """
+    Wait for subconscious worker to finish.
+
+    Args:
+        repo_path: Path to repository
+        timeout: Maximum seconds to wait
+    """
+    lockfile = get_lockfile_path(repo_path)
+
+    start = time.time()
+    while lockfile.exists():
+        if time.time() - start > timeout:
+            print_warning(f"Timeout waiting for memory processing ({timeout}s)")
+            # Remove stale lock
+            try:
+                lockfile.unlink()
+            except:
+                pass
+            break
+        time.sleep(0.5)
+
+
+def prompt_for_worker_wait(repo_path: Path) -> bool:
+    """
+    Prompt user whether to wait for running worker.
+
+    Returns:
+        True if user wants to wait, False otherwise
+    """
+    is_running, estimated_remaining = check_worker_running(repo_path)
+
+    if not is_running:
+        return False
+
+    print()
+    print_warning("Memory processing from previous session is still running.")
+    print()
+    print("Would you like to:")
+    print(f"  [1] Wait for processing to complete (~{estimated_remaining}s remaining)")
+    print("  [2] Start now (new memories will be available next session)")
+    print()
+
+    choice = input("Choice [1/2]: ").strip()
+
+    if choice == '1':
+        print()
+        print_info("⏳ Waiting for memory processing...")
+        wait_for_worker(repo_path, timeout=60)
+        print_success("✓ Memories updated")
+        print()
+        return True
+    else:
+        print()
+        print_info("→ Starting session (processing will continue in background)")
+        print()
+        return False
+
+
+def spawn_subconscious_worker(transcript_file: Path, cerebrum_path: Path):
+    """
+    Spawn background worker to process transcript.
+
+    Args:
+        transcript_file: Path to transcript file
+        cerebrum_path: Path to cerebrum root
+    """
+    worker_script = cerebrum_path / 'subconscious_worker.py'
+
+    if not worker_script.exists():
+        # Worker script not found, skip processing
+        return
+
+    # Prepare worker command
+    cmd = [
+        sys.executable,  # Python interpreter
+        str(worker_script),
+        str(transcript_file),
+        str(cerebrum_path)
+    ]
+
+    # Platform-specific spawning
+    try:
+        if sys.platform == 'win32':
+            # Windows: Use DETACHED_PROCESS flag
+            DETACHED_PROCESS = 0x00000008
+            subprocess.Popen(
+                cmd,
+                creationflags=DETACHED_PROCESS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True
+            )
+        else:
+            # Unix (Linux/Mac): Use start_new_session
+            subprocess.Popen(
+                cmd,
+                start_new_session=True,  # Detach from parent
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True
+            )
+    except Exception as e:
+        # Silently fail - don't interrupt user experience
+        pass
+
+
+# ============================================================================
+# Session Commands
+# ============================================================================
+
 def cmd_start(args):
     """Start command - begin a Samantha Hartwell LLM session in current workspace"""
     cwd = Path.cwd()
@@ -1012,6 +1241,9 @@ def cmd_start(args):
         print_info("Please remove it manually before starting a session")
         return 1
 
+    # Check for running subconscious worker and prompt user
+    prompt_for_worker_wait(repo_path)
+
     # Read bootstrap file
     bootstrap_path = repo_path / bootstrap_file
     if not bootstrap_path.exists():
@@ -1025,6 +1257,28 @@ def cmd_start(args):
         print_error(f"Failed to read bootstrap file: {e}")
         return 1
 
+    # Set up transcript capture
+    try:
+        # Import transcript capture module
+        transcript_module_path = repo_path / 'transcript_capture.py'
+        if transcript_module_path.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("transcript_capture", transcript_module_path)
+            transcript_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(transcript_module)
+
+            # Create transcript capture
+            transcript = transcript_module.TranscriptCapture(agent_name, cwd)
+            transcript.start_session()
+            has_transcript = True
+        else:
+            has_transcript = False
+            transcript = None
+    except Exception as e:
+        # Transcript capture failed, continue without it
+        has_transcript = False
+        transcript = None
+
     # Prepare agent command
     # Parse command string (handle spaces in command)
     import shlex
@@ -1035,7 +1289,12 @@ def cmd_start(args):
     print_info(f"Starting Samantha Hartwell session with agent '{agent_name}'")
     print_info(f"  Workspace: {cwd}")
     print_info(f"  Command: {agent_command}")
+    if has_transcript:
+        print_info(f"  Transcript: Capturing (subconscious enabled)")
     print()
+
+    # Record session start time
+    session_start_time = time.time()
 
     # Execute agent command with bootstrap content
     try:
@@ -1054,6 +1313,30 @@ def cmd_start(args):
     except Exception as e:
         print_error(f"Failed to execute agent: {e}")
         exit_code = 1
+
+    # Record session end and spawn worker
+    if has_transcript and transcript:
+        try:
+            session_duration = time.time() - session_start_time
+            transcript.end_session(session_duration)
+            transcript_file = transcript.close()
+
+            # Save transcript to cerebrum
+            saved_transcript = transcript_module.save_transcript_to_cerebrum(
+                transcript_file,
+                repo_path
+            )
+
+            print()
+            print_info("📝 Session transcript saved")
+
+            # Spawn subconscious worker
+            spawn_subconscious_worker(saved_transcript, repo_path)
+            print_info("🧠 Memory processing started in background")
+
+        except Exception as e:
+            # Failed to save transcript or spawn worker, continue anyway
+            pass
 
     # Cleanup auto-linked workspace
     if auto_linked and not is_manual_link:
@@ -1631,7 +1914,7 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'help', 'version'],
                         help='Command to execute')
     parser.add_argument('subcommand', nargs='?', default=None,
                         help='Subcommand (for qmd command)')
@@ -1653,6 +1936,7 @@ def main():
         'start': cmd_start,
         'qmd': cmd_qmd,
         'memories': cmd_memories,
+        'subconscious': cmd_subconscious,
         'help': cmd_help,
         'version': cmd_version,
     }
