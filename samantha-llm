@@ -575,6 +575,7 @@ Usage:
     samantha-llm qmd status        Show qmd installation status
     samantha-llm qmd check         Quick check if qmd is available
     samantha-llm memories index    Index cerebrum files for semantic search
+    samantha-llm memories search   Search memories with semantic/keyword search
     samantha-llm status            Show installation status and configuration
     samantha-llm version           Show version information
     samantha-llm help              Show this help message
@@ -1418,6 +1419,67 @@ def index_cerebrum():
         return False
 
 
+def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filters=None):
+    """Search memories using qmd"""
+    if not is_qmd_installed():
+        print_error("qmd is not installed")
+        print_info("Install with: samantha-llm qmd install")
+        return False
+
+    collection_name = "samantha-cerebrum"
+
+    # Build qmd command based on mode
+    if mode == 'keyword':
+        cmd = ['qmd', 'search', collection_name, query]
+    elif mode == 'semantic':
+        cmd = ['qmd', 'vsearch', collection_name, query]
+    else:  # hybrid (default)
+        cmd = ['qmd', 'query', collection_name, query]
+
+    # Add limit
+    cmd.extend(['--limit', str(limit)])
+
+    # Add format
+    if format_type == 'json':
+        cmd.append('--json')
+    elif format_type == 'plain':
+        cmd.append('--text')
+    # markdown is default for qmd
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            if 'not found' in result.stderr.lower() or 'does not exist' in result.stderr.lower():
+                print_error(f"Collection '{collection_name}' not found")
+                print_info("Index your cerebrum first: samantha-llm memories index")
+            else:
+                print_error(f"Search failed: {result.stderr}")
+            return False
+
+        # Output results
+        output = result.stdout.strip()
+        if not output or output == '[]':
+            print_warning("No results found")
+            print_info(f"Query: {query}")
+            print_info(f"Mode: {mode}")
+            return True
+
+        # Apply filters if provided (post-processing)
+        # For now, just output the results - full filtering can be added later
+        print(output)
+
+        return True
+
+    except Exception as e:
+        print_error(f"Search failed: {e}")
+        return False
+
+
 def cmd_memories(args):
     """Handle memory commands"""
     subcommand = args.subcommand or 'help'
@@ -1432,17 +1494,40 @@ def cmd_memories(args):
             return 0
         return 1
 
-    elif subcommand == 'help' or subcommand not in ['index']:
+    elif subcommand == 'search':
+        # Parse remaining arguments for search
+        # Get query from args.agent (since we're reusing that field)
+        query = args.agent
+        if not query:
+            print_error("Query required for search")
+            print_info("Usage: samantha-llm memories search <query>")
+            print_info("Example: samantha-llm memories search 'testing workflows'")
+            return 1
+
+        # For now, use defaults (can be enhanced with proper arg parsing later)
+        mode = 'hybrid'
+        format_type = 'markdown'
+        limit = 10
+
+        if search_memories(query, mode, format_type, limit):
+            return 0
+        return 1
+
+    elif subcommand == 'help' or subcommand not in ['index', 'search']:
         # Show help
         print_info("Memory management commands:")
         print()
-        print_info("  samantha-llm memories index    - Index cerebrum files for searching")
+        print_info("  samantha-llm memories index           - Index cerebrum files for searching")
+        print_info("  samantha-llm memories search <query>  - Search memories semantically")
         print()
-        print_info("Coming soon:")
-        print_info("  samantha-llm memories search   - Search memories with qmd")
-        print()
-        print_info("Example:")
+        print_info("Examples:")
         print_info("  samantha-llm memories index")
+        print_info("  samantha-llm memories search 'testing workflows'")
+        print_info("  samantha-llm memories search 'API design patterns'")
+        print()
+        print_info("Search modes:")
+        print_info("  Default: hybrid (keyword + semantic + AI re-ranking)")
+        print_info("  Use qmd directly for advanced options (--keyword, --semantic)")
         return 0
 
     else:
