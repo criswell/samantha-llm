@@ -571,6 +571,9 @@ Usage:
     samantha-llm start [AGENT]     Start a Samantha Hartwell session (uses default agent if not specified)
     samantha-llm link              Link current directory to samantha-llm (create .ai-cerebrum symlink)
     samantha-llm unlink            Unlink current directory from samantha-llm (remove .ai-cerebrum symlink)
+    samantha-llm qmd install       Install qmd (memory search engine) and dependencies
+    samantha-llm qmd status        Show qmd installation status
+    samantha-llm qmd check         Quick check if qmd is available
     samantha-llm status            Show installation status and configuration
     samantha-llm version           Show version information
     samantha-llm help              Show this help message
@@ -1069,6 +1072,254 @@ def cmd_start(args):
     return exit_code
 
 
+# ============================================================================
+# QMD Commands
+# ============================================================================
+
+def is_command_available(command):
+    """Check if a command is available on PATH"""
+    return shutil.which(command) is not None
+
+
+def is_bun_installed():
+    """Check if Bun runtime is installed"""
+    return is_command_available('bun')
+
+
+def is_qmd_installed():
+    """Check if qmd is installed"""
+    return is_command_available('qmd')
+
+
+def get_qmd_models_dir():
+    """Get qmd models directory"""
+    return Path.home() / '.cache' / 'qmd' / 'models'
+
+
+def get_qmd_config_file():
+    """Get qmd config file path"""
+    return get_config_dir() / 'qmd-config.json'
+
+
+def install_bun():
+    """Install Bun runtime"""
+    print_info("Installing Bun runtime...")
+
+    system = get_platform()
+
+    if system == 'windows':
+        print_error("Windows is not yet supported for automatic Bun installation")
+        print_info("Please install Bun manually: https://bun.sh/docs/installation")
+        print_info("Or use WSL (Windows Subsystem for Linux)")
+        return False
+
+    # Use official Bun installer for Linux and macOS
+    install_cmd = "curl -fsSL https://bun.sh/install | bash"
+
+    print_info("Running: curl -fsSL https://bun.sh/install | bash")
+    print_warning("This will download and install Bun to ~/.bun")
+
+    try:
+        result = subprocess.run(
+            install_cmd,
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            print_error(f"Bun installation failed: {result.stderr}")
+            return False
+
+        print_success("Bun installed successfully")
+
+        # Check if Bun is now in PATH
+        if not is_bun_installed():
+            print_warning("Bun installed but not found in PATH")
+            print_info("You may need to restart your shell or run:")
+            print_info("  source ~/.bashrc  (or ~/.zshrc)")
+            bun_path = Path.home() / '.bun' / 'bin'
+            print_info(f"  Or add to PATH: export PATH=\"{bun_path}:$PATH\"")
+            return False
+
+        return True
+
+    except Exception as e:
+        print_error(f"Failed to install Bun: {e}")
+        return False
+
+
+def install_qmd():
+    """Install qmd via Bun"""
+    print_info("Installing qmd...")
+
+    if not is_bun_installed():
+        print_error("Bun is not installed. Install Bun first with: samantha-llm qmd install-bun")
+        return False
+
+    try:
+        result = subprocess.run(
+            ['bun', 'install', '-g', 'qmd'],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            print_error(f"qmd installation failed: {result.stderr}")
+            return False
+
+        print_success("qmd installed successfully")
+
+        # Check if qmd is now available
+        if not is_qmd_installed():
+            print_warning("qmd installed but not found in PATH")
+            print_info("You may need to add Bun's global bin directory to PATH")
+            return False
+
+        # Create config file
+        config_file = get_qmd_config_file()
+        config_dir = get_config_dir()
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        qmd_config = {
+            "enabled": True,
+            "auto_index": True,
+            "search_mode": "hybrid",
+            "models_path": str(get_qmd_models_dir())
+        }
+
+        with open(config_file, 'w') as f:
+            json.dump(qmd_config, f, indent=2)
+
+        print_success(f"Created qmd config: {config_file}")
+        print()
+        print_info("qmd will auto-download models (~2GB) on first use")
+        print_info(f"Models will be cached in: {get_qmd_models_dir()}")
+
+        return True
+
+    except Exception as e:
+        print_error(f"Failed to install qmd: {e}")
+        return False
+
+
+def cmd_qmd(args):
+    """Handle qmd subcommands"""
+    subcommand = args.subcommand or 'status'
+
+    if subcommand == 'install':
+        # Install both Bun and qmd
+        print_info("Installing qmd and dependencies...")
+        print()
+
+        # Check if Bun is installed
+        if not is_bun_installed():
+            if not install_bun():
+                print()
+                print_error("Failed to install Bun. Cannot continue with qmd installation.")
+                return 1
+            print()
+        else:
+            print_success("Bun is already installed")
+            print()
+
+        # Install qmd
+        if not install_qmd():
+            return 1
+
+        print()
+        print_success("qmd installation complete!")
+        print()
+        print_info("Next steps:")
+        print_info("  1. Index your cerebrum: samantha-llm memories index")
+        print_info("  2. Search memories: samantha-llm memories search <query>")
+        return 0
+
+    elif subcommand == 'install-bun':
+        # Install only Bun
+        if is_bun_installed():
+            print_success("Bun is already installed")
+            return 0
+
+        if install_bun():
+            return 0
+        return 1
+
+    elif subcommand == 'status':
+        # Show qmd installation status
+        print_info("QMD Installation Status:")
+        print()
+
+        # Check Bun
+        if is_bun_installed():
+            try:
+                result = subprocess.run(['bun', '--version'], capture_output=True, text=True)
+                version = result.stdout.strip()
+                print_success(f"Bun: Installed (version {version})")
+            except:
+                print_success("Bun: Installed")
+        else:
+            print_error("Bun: Not installed")
+            print_info("  Install with: samantha-llm qmd install-bun")
+
+        # Check qmd
+        if is_qmd_installed():
+            try:
+                result = subprocess.run(['qmd', '--version'], capture_output=True, text=True)
+                version = result.stdout.strip() if result.stdout else 'unknown'
+                print_success(f"qmd: Installed (version {version})")
+            except:
+                print_success("qmd: Installed")
+
+            # Check for models
+            models_dir = get_qmd_models_dir()
+            if models_dir.exists():
+                model_count = len(list(models_dir.glob('*')))
+                if model_count > 0:
+                    print_success(f"Models: {model_count} models downloaded")
+                else:
+                    print_warning("Models: Not yet downloaded (will download on first use)")
+            else:
+                print_warning("Models: Not yet downloaded (will download on first use)")
+        else:
+            print_error("qmd: Not installed")
+            print_info("  Install with: samantha-llm qmd install")
+
+        # Check config
+        config_file = get_qmd_config_file()
+        if config_file.exists():
+            print_success(f"Config: {config_file}")
+        else:
+            print_warning("Config: Not created")
+
+        print()
+
+        if not is_bun_installed() or not is_qmd_installed():
+            print_info("To install qmd, run: samantha-llm qmd install")
+        else:
+            print_success("qmd is ready to use!")
+
+        return 0
+
+    elif subcommand == 'check':
+        # Quick check (exit code 0 if installed, 1 if not)
+        if is_qmd_installed():
+            print_success("qmd is installed and available")
+            return 0
+        else:
+            print_error("qmd is not installed")
+            return 1
+
+    else:
+        print_error(f"Unknown qmd subcommand: {subcommand}")
+        print_info("Available subcommands:")
+        print_info("  install      - Install qmd and dependencies")
+        print_info("  install-bun  - Install only Bun runtime")
+        print_info("  status       - Show installation status")
+        print_info("  check        - Quick check if qmd is available")
+        return 1
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -1077,8 +1328,10 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'help', 'version'],
                         help='Command to execute')
+    parser.add_argument('subcommand', nargs='?', default=None,
+                        help='Subcommand (for qmd command)')
     parser.add_argument('agent', nargs='?', default=None,
                         help='Agent name (for start command)')
     parser.add_argument('--default', dest='default_agent', metavar='AGENT',
@@ -1095,6 +1348,7 @@ def main():
         'setup': cmd_setup,
         'agents': cmd_agents,
         'start': cmd_start,
+        'qmd': cmd_qmd,
         'help': cmd_help,
         'version': cmd_version,
     }
