@@ -30,6 +30,19 @@ try:
 except Exception:
     HAS_PARSER = False
 
+# Import conversation analyzer if available
+try:
+    analyzer_path = Path(__file__).parent / 'claude_analyzer.py'
+    if analyzer_path.exists():
+        spec = importlib.util.spec_from_file_location("claude_analyzer", analyzer_path)
+        claude_analyzer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(claude_analyzer)
+        HAS_ANALYZER = True
+    else:
+        HAS_ANALYZER = False
+except Exception:
+    HAS_ANALYZER = False
+
 
 def log(log_file: Path, message: str):
     """Write to processing log."""
@@ -121,18 +134,84 @@ def process_transcript_basic(events: list, terminal_data: Optional[dict] = None)
     return analysis
 
 
-def generate_guidance_basic(cerebrum_path: Path, analysis: dict):
+def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: Path) -> Optional[dict]:
     """
-    Generate basic guidance file (placeholder for LLM-generated guidance).
+    Process transcript using LLM analysis.
 
-    In Phase 5, this will use LLM to generate rich guidance.
-    For now, just create a simple status file.
+    Args:
+        terminal_data: Parsed terminal recording data
+        cerebrum_path: Path to cerebrum root
+        log_file: Path to log file
+
+    Returns:
+        Analysis result dict if successful, None otherwise
+    """
+    if not HAS_ANALYZER:
+        log(log_file, "[WARN] LLM analyzer not available, using basic processing")
+        return None
+
+    try:
+        # Find the prompt file
+        prompt_path = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'prompts' / 'analysis-prompt-v1.txt'
+        if not prompt_path.exists():
+            log(log_file, f"[WARN] Analysis prompt not found: {prompt_path}")
+            return None
+
+        # Save terminal text to temp file for analysis
+        recordings_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'recordings'
+        parsed_dir = recordings_dir.parent / 'parsed'
+        parsed_dir.mkdir(exist_ok=True)
+
+        # Write cleaned text to parsed directory
+        session_id = terminal_data.get('metadata', {}).get('session_id', 'unknown')
+        parsed_file = parsed_dir / f'parsed_{session_id}.txt'
+        parsed_file.write_text(terminal_data['raw_text'])
+
+        log(log_file, f"[LLM] Starting conversation analysis...")
+
+        # Create analyzer and run analysis
+        analyzer = claude_analyzer.create_analyzer(prompt_path)
+        result = analyzer.analyze(parsed_file)
+
+        log(log_file, f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
+
+        # Convert to dict for easier handling
+        analysis_dict = {
+            'patterns': result.patterns,
+            'decisions': result.decisions,
+            'todos': result.todos,
+            'preferences': result.preferences,
+            'learnings': result.learnings,
+            'summary': result.summary,
+            'llm_analysis': True
+        }
+
+        return analysis_dict
+
+    except Exception as e:
+        log(log_file, f"[ERROR] LLM analysis failed: {e}")
+        import traceback
+        log(log_file, f"[ERROR] {traceback.format_exc()}")
+        return None
+
+
+def generate_guidance_basic(cerebrum_path: Path, analysis: dict, llm_analysis: Optional[dict] = None):
+    """
+    Generate guidance file with optional LLM insights.
+
+    Args:
+        cerebrum_path: Path to cerebrum root
+        analysis: Basic session analysis
+        llm_analysis: Optional LLM analysis results
     """
     guidance_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai'
     guidance_dir.mkdir(parents=True, exist_ok=True)
 
     guidance_file = guidance_dir / 'guidance.md'
-    guidance_content = f"""---
+
+    # Build content
+    content_parts = [
+        f"""---
 last_updated: {datetime.now().isoformat()}
 session_count: 1
 ---
@@ -144,16 +223,55 @@ session_count: 1
 - Duration: {analysis['duration']:.1f}s
 - Events captured: {analysis['event_count']}
 - Workspace: {analysis['workspace']}
-
-## Status
-Subconscious processing is active. This guidance will be enhanced with:
-- Pattern detection (Phase 3)
-- Memory synthesis (Phase 4)
-- Contextual guidance (Phase 5)
-
-Session ID: {analysis['session_id']}
+- Session ID: {analysis['session_id']}
 """
+    ]
 
+    # Add LLM insights if available
+    if llm_analysis and not llm_analysis.get('empty', True):
+        content_parts.append("\n## Conversation Analysis\n")
+
+        if llm_analysis.get('summary'):
+            content_parts.append(f"### Summary\n{llm_analysis['summary']}\n")
+
+        if llm_analysis.get('patterns'):
+            content_parts.append("### Patterns Observed")
+            for pattern in llm_analysis['patterns']:
+                content_parts.append(f"- {pattern}")
+            content_parts.append("")
+
+        if llm_analysis.get('decisions'):
+            content_parts.append("### Decisions Made")
+            for decision in llm_analysis['decisions']:
+                content_parts.append(f"- {decision}")
+            content_parts.append("")
+
+        if llm_analysis.get('todos'):
+            content_parts.append("### Action Items")
+            for todo in llm_analysis['todos']:
+                if not todo.startswith("- [ ]"):
+                    todo = f"- [ ] {todo}"
+                content_parts.append(todo)
+            content_parts.append("")
+
+        if llm_analysis.get('preferences'):
+            content_parts.append("### User Preferences")
+            for pref in llm_analysis['preferences']:
+                content_parts.append(f"- {pref}")
+            content_parts.append("")
+
+        if llm_analysis.get('learnings'):
+            content_parts.append("### Key Learnings")
+            for learning in llm_analysis['learnings']:
+                content_parts.append(f"- {learning}")
+            content_parts.append("")
+    else:
+        content_parts.append("""
+## Status
+Subconscious processing is active. Waiting for LLM analysis.
+""")
+
+    guidance_content = "\n".join(content_parts)
     guidance_file.write_text(guidance_content)
     return guidance_file
 
@@ -199,17 +317,25 @@ def main():
                 except Exception as e:
                     log(log_file, f"[WARN] Failed to parse terminal recording: {e}")
 
-        # Process transcript (basic for now)
+        # Process transcript (basic statistics)
         analysis = process_transcript_basic(events, terminal_data)
         log(log_file, f"[ANALYZE] Session: {analysis['session_id']}, Duration: {analysis['duration']:.1f}s")
         if terminal_data:
             log(log_file, f"[ANALYZE] Terminal recording: {analysis['terminal_text_length']} chars")
 
-        # TODO Phase 3: LLM processing for pattern detection
+        # Phase 3: LLM processing for pattern detection
+        llm_analysis = None
+        if terminal_data and HAS_ANALYZER:
+            llm_analysis = process_transcript_llm(terminal_data, cerebrum_path, log_file)
+            if llm_analysis:
+                log(log_file, f"[LLM] Found {len(llm_analysis.get('patterns', []))} patterns, {len(llm_analysis.get('decisions', []))} decisions")
+            else:
+                log(log_file, "[LLM] Analysis not available, falling back to basic processing")
+
         # TODO Phase 4: Memory creation/updates
 
-        # Generate guidance (basic for now)
-        guidance_file = generate_guidance_basic(cerebrum_path, analysis)
+        # Generate guidance (with LLM insights if available)
+        guidance_file = generate_guidance_basic(cerebrum_path, analysis, llm_analysis)
         log(log_file, f"[GUIDANCE] Generated guidance: {guidance_file}")
 
         # Move processed transcript to processed directory

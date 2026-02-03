@@ -24,6 +24,92 @@ FILENAME = os.path.basename(__file__)
 # Version
 VERSION = "0.4.1"
 
+# Subconscious analysis prompt template
+ANALYSIS_PROMPT_TEMPLATE = """You are analyzing a terminal recording of a conversation between a user and an AI coding assistant (Claude, Copilot, or Abacus.ai). Your goal is to extract meaningful insights that will help the AI assistant better understand the user's work patterns, preferences, and context in future sessions.
+
+The conversation text has been cleaned of ANSI codes and formatting, but preserves the actual dialogue and actions taken.
+
+## Your Task
+
+Analyze the conversation and extract insights in the following categories:
+
+### 1. Patterns
+Identify recurring workflows, common tasks, or repeated behaviors. Examples:
+- "User frequently uses Task tool to track multi-step work"
+- "User prefers to review plans before implementation"
+- "User often asks for multiple options before deciding"
+
+### 2. Decisions
+Document architectural choices, technical decisions, and trade-offs discussed. Include rationale when available. Examples:
+- "Decided to use JSON over YAML for config (better programmatic access)"
+- "Chose to implement Claude first, then adapt to other agents (validate quality before compatibility)"
+- "Opted for plain text parsing over JSON schema (works across all agents)"
+
+### 3. TODOs
+Extract action items, follow-ups, or deferred work mentioned during the conversation. Examples:
+- "Test subconscious worker with real terminal recordings"
+- "Add Abacus analyzer after Claude is working"
+- "Consider extracting bricklayer into separate package (Q2 2026)"
+
+### 4. Preferences
+Identify the user's working style, preferences, or dislikes. Examples:
+- "User prefers starting with simple solutions before optimizing"
+- "User values thorough research and analysis before implementation"
+- "User likes having escape hatches (e.g., reset commands for customizations)"
+
+### 5. Learnings
+Capture new knowledge, discoveries, or insights gained during the session. Examples:
+- "Discovered that Copilot doesn't support JSON output, only plain text"
+- "Learned that each LLM has different permission models (tool-based vs path-based)"
+- "Found that terminal recordings can be parsed to extract session metadata"
+
+## Output Format
+
+Provide your analysis in the following structured markdown format:
+
+```markdown
+# Conversation Analysis
+
+## Patterns
+- [Pattern description]
+- [Pattern description]
+
+## Decisions
+- [Decision]: [Rationale]
+- [Decision]: [Rationale]
+
+## TODOs
+- [ ] [Action item]
+- [ ] [Action item]
+
+## Preferences
+- [Preference]: [Context]
+- [Preference]: [Context]
+
+## Learnings
+- [Learning]: [Details]
+- [Learning]: [Details]
+
+## Summary
+[2-3 sentence summary of the session and its significance]
+```
+
+## Guidelines
+
+- Be concise but specific
+- Focus on insights that would be useful in future sessions
+- If a category has no relevant items, write "None identified" instead of leaving it empty
+- Prioritize quality over quantity (3-5 good items per category is better than 10 mediocre ones)
+- Include enough context so the insights make sense without reading the full conversation
+- For technical decisions, capture the "why" not just the "what"
+
+## The Conversation to Analyze
+
+The terminal recording text follows below. Remember: extract insights, not a transcript.
+
+---
+"""
+
 # ANSI color codes
 class Colors:
     RED = '\033[0;31m'
@@ -248,6 +334,62 @@ def create_config():
     return write_config(config)
 
 
+def get_subconscious_prompt_path():
+    """Get path to subconscious analysis prompt"""
+    config_dir = get_config_dir()
+    return config_dir / 'subconscious' / 'analysis-prompt.txt'
+
+
+def ensure_subconscious_prompt():
+    """Ensure subconscious analysis prompt exists, create if missing"""
+    prompt_path = get_subconscious_prompt_path()
+
+    # Create directory if needed
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write prompt if doesn't exist
+    if not prompt_path.exists():
+        print_info(f"Creating subconscious analysis prompt: {prompt_path}")
+        prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE)
+
+        # Also create README
+        readme_path = prompt_path.parent / 'README.md'
+        readme_content = """# Subconscious Analysis Prompt
+
+This directory contains the system prompt used by the subconscious worker to analyze conversation recordings.
+
+## Files
+
+- `analysis-prompt.txt` - The prompt used for LLM analysis
+
+## Customization
+
+You can modify `analysis-prompt.txt` to customize how the subconscious analyzes your conversations. The prompt defines what insights are extracted (patterns, decisions, TODOs, preferences, learnings) and the output format.
+
+## Restoring Default
+
+If you break the prompt or want to restore the default:
+
+```bash
+samantha-llm subconscious reset-prompt
+```
+
+This will restore the original prompt template.
+"""
+        readme_path.write_text(readme_content)
+
+    return prompt_path
+
+
+def reset_subconscious_prompt():
+    """Reset subconscious analysis prompt to default"""
+    prompt_path = get_subconscious_prompt_path()
+
+    print_info(f"Resetting subconscious analysis prompt to default")
+    prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE)
+    print_success(f"Prompt reset: {prompt_path}")
+
+
 def install_unix():
     """Install on Unix-like systems (Linux, macOS) using symlink"""
     install_dir = get_install_dir()
@@ -361,6 +503,9 @@ def cmd_install(args):
     if not create_config():
         print_error("Failed to create config file")
         return 1
+
+    # Ensure subconscious prompt exists
+    ensure_subconscious_prompt()
 
     # Platform-specific installation
     system = get_platform()
@@ -640,9 +785,23 @@ def cmd_subconscious(args):
         print_success("Worker finished")
         return 0
 
+    elif subcommand == 'reset-prompt':
+        # Reset analysis prompt to default
+        print_warning("This will reset your subconscious analysis prompt to the default.")
+        print_info("Any customizations will be lost.")
+        print()
+
+        response = input("Continue? [y/N] ")
+        if response.lower() not in ['y', 'yes']:
+            print_info("Cancelled.")
+            return 0
+
+        reset_subconscious_prompt()
+        return 0
+
     else:
         print_error(f"Unknown subcommand: {subcommand}")
-        print_info("Available subcommands: status, guidance, wait")
+        print_info("Available subcommands: status, guidance, wait, reset-prompt")
         return 1
 
 
@@ -664,6 +823,10 @@ Usage:
     samantha-llm qmd check         Quick check if qmd is available
     samantha-llm memories index    Index cerebrum files for semantic search
     samantha-llm memories search   Search memories with semantic/keyword search
+    samantha-llm subconscious status       Show subconscious worker status
+    samantha-llm subconscious guidance     Show conversation analysis guidance
+    samantha-llm subconscious wait         Wait for worker to finish processing
+    samantha-llm subconscious reset-prompt Reset analysis prompt to default
     samantha-llm status            Show installation status and configuration
     samantha-llm version           Show version information
     samantha-llm help              Show this help message
