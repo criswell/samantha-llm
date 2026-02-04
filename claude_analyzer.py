@@ -15,16 +15,20 @@ from conversation_analyzer import SubconsciousAnalyzer, AnalysisResult, Analysis
 class ClaudeAnalyzer(SubconsciousAnalyzer):
     """Conversation analyzer using Claude Code CLI."""
 
-    def __init__(self, prompt_path: Path, allowed_tools: Optional[list] = None):
+    def __init__(self, prompt_path: Path, allowed_tools: Optional[list] = None, output_dir: Optional[Path] = None):
         """
         Initialize Claude analyzer.
 
         Args:
             prompt_path: Path to the analysis prompt file
             allowed_tools: List of tools Claude can use (default: ["Read"])
+            output_dir: Optional directory to save raw LLM output
         """
         super().__init__(prompt_path)
         self.allowed_tools = allowed_tools or ["Read"]
+        self.output_dir = output_dir
+        if output_dir:
+            output_dir.mkdir(parents=True, exist_ok=True)
 
     def analyze(self, recording_path: Path) -> AnalysisResult:
         """
@@ -45,6 +49,13 @@ class ClaudeAnalyzer(SubconsciousAnalyzer):
 
         # Invoke Claude in headless mode
         raw_output = self._invoke_claude(recording_text)
+
+        # Save raw output if output directory is configured
+        if self.output_dir:
+            # Extract session ID from recording filename (e.g., parsed_20260204_092751.txt)
+            session_id = recording_path.stem.replace('parsed_', '')
+            output_file = self.output_dir / f'analysis_{session_id}.md'
+            output_file.write_text(raw_output)
 
         # Parse the output
         result = AnalysisParser.parse(raw_output)
@@ -91,7 +102,12 @@ class ClaudeAnalyzer(SubconsciousAnalyzer):
             raise RuntimeError("Claude analysis timed out after 5 minutes")
 
         except subprocess.CalledProcessError as e:
-            error_msg = f"Claude invocation failed: {e.stderr}"
+            error_msg = (
+                f"Claude invocation failed with exit code {e.returncode}\n"
+                f"Command: {' '.join(cmd)}\n"
+                f"STDOUT:\n{e.stdout}\n"
+                f"STDERR:\n{e.stderr}"
+            )
             raise RuntimeError(error_msg)
 
         except FileNotFoundError:
@@ -100,17 +116,19 @@ class ClaudeAnalyzer(SubconsciousAnalyzer):
             )
 
 
-def create_analyzer(prompt_path: Path) -> ClaudeAnalyzer:
+def create_analyzer(prompt_path: Path, output_dir: Optional[Path] = None) -> ClaudeAnalyzer:
     """
     Factory function to create a Claude analyzer.
 
     Args:
         prompt_path: Path to the analysis prompt file
+        output_dir: Optional directory to save raw LLM output
 
     Returns:
         Configured ClaudeAnalyzer instance
     """
     return ClaudeAnalyzer(
         prompt_path=prompt_path,
-        allowed_tools=["Read"]  # Only allow reading files
+        allowed_tools=["Read"],  # Only allow reading files
+        output_dir=output_dir
     )

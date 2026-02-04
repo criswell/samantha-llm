@@ -152,7 +152,7 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: P
 
     try:
         # Find the prompt file
-        prompt_path = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'prompts' / 'analysis-prompt-v1.txt'
+        prompt_path = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'prompts' / 'analysis-prompt-v2.txt'
         if not prompt_path.exists():
             log(log_file, f"[WARN] Analysis prompt not found: {prompt_path}")
             return None
@@ -162,6 +162,10 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: P
         parsed_dir = recordings_dir.parent / 'parsed'
         parsed_dir.mkdir(exist_ok=True)
 
+        # Create analyses directory for raw LLM output
+        analyses_dir = recordings_dir.parent / 'analyses'
+        analyses_dir.mkdir(exist_ok=True)
+
         # Write cleaned text to parsed directory
         session_id = terminal_data.get('metadata', {}).get('session_id', 'unknown')
         parsed_file = parsed_dir / f'parsed_{session_id}.txt'
@@ -170,10 +174,11 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: P
         log(log_file, f"[LLM] Starting conversation analysis...")
 
         # Create analyzer and run analysis
-        analyzer = claude_analyzer.create_analyzer(prompt_path)
+        analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
         result = analyzer.analyze(parsed_file)
 
         log(log_file, f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
+        log(log_file, f"[LLM] Raw output saved to: {analyses_dir / f'analysis_{session_id}.md'}")
 
         # Convert to dict for easier handling
         analysis_dict = {
@@ -228,7 +233,7 @@ session_count: 1
     ]
 
     # Add LLM insights if available
-    if llm_analysis and not llm_analysis.get('empty', True):
+    if llm_analysis and not llm_analysis.get('empty', False):
         content_parts.append("\n## Conversation Analysis\n")
 
         if llm_analysis.get('summary'):
