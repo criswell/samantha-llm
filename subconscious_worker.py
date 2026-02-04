@@ -398,7 +398,7 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: P
 
 def generate_guidance_basic(cerebrum_path: Path, analysis: dict, llm_analysis: Optional[dict] = None):
     """
-    Generate guidance file with optional LLM insights.
+    Generate lightweight guidance file - just a session log for quick orientation.
 
     Args:
         cerebrum_path: Path to cerebrum root
@@ -410,66 +410,65 @@ def generate_guidance_basic(cerebrum_path: Path, analysis: dict, llm_analysis: O
 
     guidance_file = guidance_dir / 'guidance.md'
 
-    # Build content
+    # Extract date from session_id or use current date
+    session_id = analysis.get('session_id', 'unknown')
+    session_date = session_id.split('_')[0] if '_' in session_id else datetime.now().strftime('%Y%m%d')
+
+    # Format: YYYYMMDD -> YYYY-MM-DD
+    if len(session_date) == 8:
+        formatted_date = f"{session_date[0:4]}-{session_date[4:6]}-{session_date[6:8]}"
+    else:
+        formatted_date = datetime.now().strftime('%Y-%m-%d')
+
+    # Build lightweight session entry
     content_parts = [
         f"""---
 last_updated: {datetime.now().isoformat()}
-session_count: 1
 ---
 
 # Subconscious Guidance
 
-## Last Session Summary
-- Agent: {analysis['agent']}
-- Duration: {analysis['duration']:.1f}s
-- Events captured: {analysis['event_count']}
-- Workspace: {analysis['workspace']}
-- Session ID: {analysis['session_id']}
+Quick orientation from recent sessions. For detailed analysis, see files in `.ai/subconscious/.ai/analyses/`.
+
+## Recent Sessions
 """
     ]
 
-    # Add LLM insights if available
+    # Create session entry
+    duration_min = int(analysis['duration'] / 60)
+    workspace = analysis.get('workspace', 'unknown')
+
+    # Create content summary from LLM analysis
     if llm_analysis and not llm_analysis.get('empty', False):
-        content_parts.append("\n## Conversation Analysis\n")
+        summary = llm_analysis.get('summary', '')
 
-        if llm_analysis.get('summary'):
-            content_parts.append(f"### Summary\n{llm_analysis['summary']}\n")
+        # If summary is multi-line (from chunked analysis), take first meaningful line
+        if summary:
+            summary_lines = [line.strip() for line in summary.split('\n') if line.strip() and not line.startswith('**Chunk')]
+            summary_text = summary_lines[0] if summary_lines else 'Session analyzed'
+        else:
+            summary_text = 'Session analyzed'
 
-        if llm_analysis.get('patterns'):
-            content_parts.append("### Patterns Observed")
-            for pattern in llm_analysis['patterns']:
-                content_parts.append(f"- {pattern}")
-            content_parts.append("")
+        # Add key decisions if available (max 2)
+        decisions = llm_analysis.get('decisions', [])
+        if decisions:
+            decisions_text = "; ".join(decisions[:2])
+            summary_text = f"{summary_text}. {decisions_text}"
 
-        if llm_analysis.get('decisions'):
-            content_parts.append("### Decisions Made")
-            for decision in llm_analysis['decisions']:
-                content_parts.append(f"- {decision}")
-            content_parts.append("")
+        # Link to detailed analysis
+        analysis_link = f"analysis_{session_id}_full.md" if session_id != 'unknown' else "analysis files"
 
-        if llm_analysis.get('todos'):
-            content_parts.append("### Action Items")
-            for todo in llm_analysis['todos']:
-                if not todo.startswith("- [ ]"):
-                    todo = f"- [ ] {todo}"
-                content_parts.append(todo)
-            content_parts.append("")
-
-        if llm_analysis.get('preferences'):
-            content_parts.append("### User Preferences")
-            for pref in llm_analysis['preferences']:
-                content_parts.append(f"- {pref}")
-            content_parts.append("")
-
-        if llm_analysis.get('learnings'):
-            content_parts.append("### Key Learnings")
-            for learning in llm_analysis['learnings']:
-                content_parts.append(f"- {learning}")
-            content_parts.append("")
+        session_entry = f"- **{formatted_date}** ({duration_min}min, {workspace}): {summary_text} [[{analysis_link}]]"
     else:
-        content_parts.append("""
-## Status
-Subconscious processing is active. Waiting for LLM analysis.
+        session_entry = f"- **{formatted_date}** ({duration_min}min, {workspace}): Processing... (analysis pending)"
+
+    content_parts.append(session_entry)
+    content_parts.append("")
+
+    content_parts.append("""
+---
+
+*Guidance is lightweight - detailed session notes and memories are in analysis files and will be processed into cerebrum memories in Phase 4.*
 """)
 
     guidance_content = "\n".join(content_parts)
