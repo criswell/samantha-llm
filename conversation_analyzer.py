@@ -159,50 +159,97 @@ class AnalysisParser:
         # Split into sections
         sections = AnalysisParser._extract_sections(markdown_output)
 
-        # Parse each section
+        # Parse each section (with fallback to alternative names)
         result.patterns = AnalysisParser._extract_list_items(
             sections.get('patterns', '')
         )
         result.decisions = AnalysisParser._extract_list_items(
-            sections.get('decisions', '')
+            sections.get('key decisions', sections.get('decisions', ''))
         )
         result.todos = AnalysisParser._extract_list_items(
-            sections.get('todos', '')
+            sections.get('action items & todos (detailed)', sections.get('todos', ''))
         )
         result.preferences = AnalysisParser._extract_list_items(
-            sections.get('preferences', '')
+            sections.get('user preferences', sections.get('preferences', ''))
         )
         result.learnings = AnalysisParser._extract_list_items(
-            sections.get('learnings', '')
+            sections.get('key learnings', sections.get('learnings', ''))
         )
-        result.summary = sections.get('summary', '').strip() or None
+        result.summary = (sections.get('session summary', sections.get('summary', '')) or '').strip() or None
 
         return result
 
     @staticmethod
     def _extract_sections(text: str) -> dict:
-        """Extract markdown sections by heading."""
+        """
+        Extract markdown sections by heading.
+
+        Handles two structures:
+        1. Hierarchical (from raw LLM output):
+           - ## Part 2: High-Level Insights
+             - ### Patterns
+             - ### Key Decisions
+        2. Flat (from to_markdown() output):
+           - ## Patterns
+           - ## Decisions
+
+        Extracts both level 2 (##) and level 3 (###) headings.
+        """
         sections = {}
         current_section = None
+        current_subsection = None
         current_content = []
+        in_part2 = False
 
         for line in text.split('\n'):
-            # Check for section headings
+            # Check for level 2 headings (##)
             heading_match = re.match(r'^##\s+(.+)$', line)
             if heading_match:
-                # Save previous section
-                if current_section:
-                    sections[current_section] = '\n'.join(current_content)
+                # Save previous subsection/section
+                if current_subsection:
+                    sections[current_subsection] = '\n'.join(current_content)
+                    current_subsection = None
+                    current_content = []
+                elif current_section and current_content:
+                    # Only save if not a Part 2 container
+                    if not in_part2 or 'part 2' not in current_section:
+                        sections[current_section] = '\n'.join(current_content)
+                    current_content = []
 
-                # Start new section
-                current_section = heading_match.group(1).lower()
-                current_content = []
-            elif current_section:
+                # Check if this is Part 2
+                heading = heading_match.group(1).lower()
+                in_part2 = 'part 2' in heading
+
+                # For non-Part 2 headings, treat as sections
+                if not in_part2:
+                    current_section = heading
+                else:
+                    current_section = heading
+                continue
+
+            # Check for level 3 headings (###)
+            subheading_match = re.match(r'^###\s+(.+)$', line)
+            if subheading_match:
+                # Save previous subsection
+                if current_subsection:
+                    sections[current_subsection] = '\n'.join(current_content)
+                    current_content = []
+
+                # Start new subsection (only when in Part 2)
+                if in_part2:
+                    current_subsection = subheading_match.group(1).lower()
+                continue
+
+            # Accumulate content
+            if current_subsection or current_section:
                 current_content.append(line)
 
-        # Save last section
-        if current_section:
-            sections[current_section] = '\n'.join(current_content)
+        # Save last subsection/section
+        if current_subsection:
+            sections[current_subsection] = '\n'.join(current_content)
+        elif current_section and current_content:
+            if not in_part2 or 'part 2' not in current_section:
+                sections[current_section] = '\n'.join(current_content)
 
         return sections
 

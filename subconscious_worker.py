@@ -290,8 +290,13 @@ def _merge_chunk_results(chunk_results, session_id: str, log_file: Path):
         all_preferences.extend(result.preferences)
         all_learnings.extend(result.learnings)
 
+        # Extract session summary (truncate if too long to keep guidance lightweight)
         if result.summary:
-            summaries.append(f"**Chunk {chunk_num}**: {result.summary}")
+            summary_text = result.summary.strip()
+            # If summary is very long (>500 chars), it likely includes Part 1 content - truncate it
+            if len(summary_text) > 500:
+                summary_text = summary_text[:497] + "..."
+            summaries.append(f"**Chunk {chunk_num}**: {summary_text}")
 
     # Deduplicate
     merged = AnalysisResult(
@@ -442,18 +447,30 @@ Quick orientation from recent sessions. For detailed analysis, see files in `.ai
     if llm_analysis and not llm_analysis.get('empty', False):
         summary = llm_analysis.get('summary', '')
 
-        # If summary is multi-line (from chunked analysis), take first meaningful line
+        # Extract meaningful content from summary (skip headings, chunk markers)
         if summary:
-            summary_lines = [line.strip() for line in summary.split('\n') if line.strip() and not line.startswith('**Chunk')]
-            summary_text = summary_lines[0] if summary_lines else 'Session analyzed'
+            summary_lines = []
+            for line in summary.split('\n'):
+                line = line.strip()
+                # Skip empty lines, chunk markers, markdown headings, and labels
+                if (line and
+                    not line.startswith('**Chunk') and
+                    not line.startswith('#') and
+                    not line.endswith(':') and
+                    not line.startswith('**Detailed') and
+                    not line.startswith('**High-Level')):
+                    summary_lines.append(line)
+
+            # Take first 2-3 meaningful lines or bullet points
+            if summary_lines:
+                summary_text = ' '.join(summary_lines[:2])
+                # Truncate if too long
+                if len(summary_text) > 200:
+                    summary_text = summary_text[:200] + "..."
+            else:
+                summary_text = 'Session analyzed'
         else:
             summary_text = 'Session analyzed'
-
-        # Add key decisions if available (max 2)
-        decisions = llm_analysis.get('decisions', [])
-        if decisions:
-            decisions_text = "; ".join(decisions[:2])
-            summary_text = f"{summary_text}. {decisions_text}"
 
         # Link to detailed analysis
         analysis_link = f"analysis_{session_id}_full.md" if session_id != 'unknown' else "analysis files"
@@ -532,7 +549,35 @@ def main():
             else:
                 log(log_file, "[LLM] Analysis not available, falling back to basic processing")
 
-        # TODO Phase 4: Memory creation/updates
+        # Phase 4: Memory creation (if LLM analysis available)
+        memory_file = None
+        if llm_analysis and not llm_analysis.get('empty', False):
+            try:
+                from memory_generator import generate_memory_file
+                from conversation_analyzer import AnalysisResult
+
+                # Convert llm_analysis dict to AnalysisResult object
+                analysis_result = AnalysisResult(
+                    patterns=llm_analysis.get('patterns', []),
+                    decisions=llm_analysis.get('decisions', []),
+                    todos=llm_analysis.get('todos', []),
+                    preferences=llm_analysis.get('preferences', []),
+                    learnings=llm_analysis.get('learnings', []),
+                    summary=llm_analysis.get('summary')
+                )
+
+                memory_file = generate_memory_file(
+                    analysis=analysis_result,
+                    session_id=analysis['session_id'],
+                    workspace=Path(analysis.get('workspace', 'unknown')),
+                    duration_seconds=int(analysis['duration']),
+                    cerebrum_path=cerebrum_path
+                )
+                log(log_file, f"[MEMORY] Created memory file: {memory_file}")
+            except Exception as e:
+                log(log_file, f"[MEMORY] Failed to create memory file: {e}")
+                import traceback
+                log(log_file, f"[MEMORY] {traceback.format_exc()}")
 
         # Generate guidance (with LLM insights if available)
         guidance_file = generate_guidance_basic(cerebrum_path, analysis, llm_analysis)
