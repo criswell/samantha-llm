@@ -43,6 +43,19 @@ try:
 except Exception:
     HAS_ANALYZER = False
 
+# Import conversation chunker if available
+try:
+    chunker_path = Path(__file__).parent / 'conversation_chunker.py'
+    if chunker_path.exists():
+        spec = importlib.util.spec_from_file_location("conversation_chunker", chunker_path)
+        conversation_chunker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(conversation_chunker)
+        HAS_CHUNKER = True
+    else:
+        HAS_CHUNKER = False
+except Exception:
+    HAS_CHUNKER = False
+
 
 def log(log_file: Path, message: str):
     """Write to processing log."""
@@ -134,6 +147,167 @@ def process_transcript_basic(events: list, terminal_data: Optional[dict] = None)
     return analysis
 
 
+def _analyze_with_chunking(
+    conversation_text: str,
+    session_id: str,
+    prompt_path: Path,
+    analyses_dir: Path,
+    parsed_dir: Path,
+    log_file: Path
+):
+    """
+    Analyze long conversation using chunking with context passing.
+
+    Args:
+        conversation_text: Full conversation text
+        session_id: Session identifier
+        prompt_path: Path to analysis prompt
+        analyses_dir: Directory for raw LLM output
+        parsed_dir: Directory for parsed text
+        log_file: Log file path
+
+    Returns:
+        Combined AnalysisResult from all chunks
+    """
+    # Create chunker
+    chunker = conversation_chunker.create_chunker(target_size=150000)
+    chunks = chunker.chunk(conversation_text, strategy='natural')
+
+    log(log_file, f"[LLM] Split conversation into {len(chunks)} chunks")
+
+    # Create analyzer with output_dir to save raw LLM output for each chunk
+    analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
+
+    # Process each chunk with context from previous chunks
+    chunk_results = []
+    accumulated_context = ""
+
+    for chunk in chunks:
+        chunk_num = chunk.chunk_index + 1
+        log(log_file, f"[LLM] Analyzing chunk {chunk_num}/{chunk.total_chunks} ({len(chunk):,} chars, boundary: {chunk.boundary_reason})")
+
+        # Prepend context from previous chunks (if any)
+        if accumulated_context:
+            chunk_text_with_context = f"{accumulated_context}\n\n---\n\n{chunk.text}"
+        else:
+            chunk_text_with_context = chunk.text
+
+        # Write chunk to temp file
+        chunk_file = parsed_dir / f'parsed_{session_id}_chunk{chunk_num}.txt'
+        chunk_file.write_text(chunk_text_with_context)
+
+        # Analyze chunk (raw output automatically saved to analyses_dir)
+        try:
+            result = analyzer.analyze(chunk_file)
+
+            log(log_file, f"[LLM] Chunk {chunk_num} complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions")
+            log(log_file, f"[LLM] Raw output saved: analysis_{session_id}_chunk{chunk_num}.md")
+
+            chunk_results.append(result)
+
+            # Update accumulated context for next chunk
+            if chunk_num < chunk.total_chunks:
+                accumulated_context = result.to_context_summary()
+
+        except Exception as e:
+            log(log_file, f"[ERROR] Chunk {chunk_num} analysis failed: {e}")
+            # Continue with remaining chunks
+            continue
+
+    # Merge all chunk results
+    log(log_file, f"[LLM] Merging {len(chunk_results)} chunk results...")
+    merged_result = _merge_chunk_results(chunk_results, session_id, log_file)
+
+    # Save combined parsed analysis (Part 2 only - for guidance)
+    combined_parsed_file = analyses_dir / f'analysis_{session_id}_parsed.md'
+    combined_parsed_file.write_text(merged_result.to_markdown())
+    log(log_file, f"[LLM] Combined parsed analysis saved to: {combined_parsed_file}")
+
+    # Combine all raw chunk outputs (includes Part 1 + Part 2 for each chunk)
+    log(log_file, f"[LLM] Combining raw chunk outputs...")
+    combined_sections = []
+    for i in range(len(chunk_results)):
+        chunk_num = i + 1
+        chunk_raw_file = analyses_dir / f'analysis_{session_id}_chunk{chunk_num}.md'
+        if chunk_raw_file.exists():
+            chunk_content = chunk_raw_file.read_text()
+            combined_sections.append(f"# Chunk {chunk_num}/{len(chunk_results)}\n\n{chunk_content}")
+
+    # Save combined raw output (full detailed analysis)
+    combined_raw_file = analyses_dir / f'analysis_{session_id}_full.md'
+    combined_raw_file.write_text("\n\n---\n\n".join(combined_sections))
+    log(log_file, f"[LLM] Combined raw analysis saved to: {combined_raw_file}")
+
+    return merged_result
+
+
+def _merge_chunk_results(chunk_results, session_id: str, log_file: Path):
+    """
+    Merge multiple AnalysisResult objects into one.
+
+    Args:
+        chunk_results: List of AnalysisResult objects
+        session_id: Session identifier
+        log_file: Log file path
+
+    Returns:
+        Combined AnalysisResult
+    """
+    from conversation_analyzer import AnalysisResult
+
+    if not chunk_results:
+        return AnalysisResult()
+
+    if len(chunk_results) == 1:
+        return chunk_results[0]
+
+    # Combine all lists, removing duplicates while preserving order
+    def dedupe_list(items):
+        seen = set()
+        result = []
+        for item in items:
+            # Normalize for comparison (lowercase, strip)
+            normalized = item.lower().strip()
+            if normalized not in seen:
+                seen.add(normalized)
+                result.append(item)
+        return result
+
+    all_patterns = []
+    all_decisions = []
+    all_todos = []
+    all_preferences = []
+    all_learnings = []
+    summaries = []
+
+    for i, result in enumerate(chunk_results):
+        # Add chunk marker to items for traceability
+        chunk_num = i + 1
+
+        all_patterns.extend(result.patterns)
+        all_decisions.extend(result.decisions)
+        all_todos.extend(result.todos)
+        all_preferences.extend(result.preferences)
+        all_learnings.extend(result.learnings)
+
+        if result.summary:
+            summaries.append(f"**Chunk {chunk_num}**: {result.summary}")
+
+    # Deduplicate
+    merged = AnalysisResult(
+        patterns=dedupe_list(all_patterns),
+        decisions=dedupe_list(all_decisions),
+        todos=dedupe_list(all_todos),
+        preferences=dedupe_list(all_preferences),
+        learnings=dedupe_list(all_learnings),
+        summary="\n\n".join(summaries) if summaries else None
+    )
+
+    log(log_file, f"[LLM] Merged results: {len(merged.patterns)} patterns, {len(merged.decisions)} decisions, {len(merged.todos)} TODOs")
+
+    return merged
+
+
 def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: Path) -> Optional[dict]:
     """
     Process transcript using LLM analysis.
@@ -166,19 +340,41 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: P
         analyses_dir = recordings_dir.parent / 'analyses'
         analyses_dir.mkdir(exist_ok=True)
 
-        # Write cleaned text to parsed directory
+        # Get conversation text
         session_id = terminal_data.get('metadata', {}).get('session_id', 'unknown')
-        parsed_file = parsed_dir / f'parsed_{session_id}.txt'
-        parsed_file.write_text(terminal_data['raw_text'])
+        conversation_text = terminal_data['raw_text']
+        text_size = len(conversation_text)
 
-        log(log_file, f"[LLM] Starting conversation analysis...")
+        log(log_file, f"[LLM] Conversation size: {text_size:,} characters")
 
-        # Create analyzer and run analysis
-        analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
-        result = analyzer.analyze(parsed_file)
+        # Check if chunking is needed
+        CHUNK_THRESHOLD = 150000  # ~200K tokens with prompt
+        needs_chunking = text_size > CHUNK_THRESHOLD and HAS_CHUNKER
 
-        log(log_file, f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
-        log(log_file, f"[LLM] Raw output saved to: {analyses_dir / f'analysis_{session_id}.md'}")
+        if needs_chunking:
+            log(log_file, f"[LLM] Conversation exceeds {CHUNK_THRESHOLD:,} chars, using chunked analysis")
+            result = _analyze_with_chunking(
+                conversation_text,
+                session_id,
+                prompt_path,
+                analyses_dir,
+                parsed_dir,
+                log_file
+            )
+        else:
+            # Single-pass analysis (original behavior)
+            log(log_file, f"[LLM] Starting conversation analysis...")
+
+            # Write to parsed directory
+            parsed_file = parsed_dir / f'parsed_{session_id}.txt'
+            parsed_file.write_text(conversation_text)
+
+            # Create analyzer and run analysis
+            analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
+            result = analyzer.analyze(parsed_file)
+
+            log(log_file, f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
+            log(log_file, f"[LLM] Raw output saved to: {analyses_dir / f'analysis_{session_id}.md'}")
 
         # Convert to dict for easier handling
         analysis_dict = {

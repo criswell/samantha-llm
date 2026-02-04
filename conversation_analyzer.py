@@ -34,6 +34,41 @@ class AnalysisResult:
             self.learnings
         ])
 
+    def to_context_summary(self) -> str:
+        """
+        Generate concise context summary for passing to next chunk.
+
+        Used in chunked analysis to preserve context across boundaries.
+        """
+        lines = []
+
+        lines.append("## Previous Context")
+        lines.append("")
+
+        if self.summary:
+            lines.append(f"**Summary**: {self.summary}")
+            lines.append("")
+
+        if self.decisions:
+            lines.append("**Key Decisions:**")
+            for decision in self.decisions[:3]:  # Top 3 decisions
+                lines.append(f"- {decision}")
+            lines.append("")
+
+        if self.patterns:
+            lines.append("**Observed Patterns:**")
+            for pattern in self.patterns[:3]:  # Top 3 patterns
+                lines.append(f"- {pattern}")
+            lines.append("")
+
+        if self.todos:
+            lines.append("**Pending Items:**")
+            for todo in self.todos[:3]:  # Top 3 TODOs
+                lines.append(f"- {todo}")
+            lines.append("")
+
+        return "\n".join(lines)
+
     def to_markdown(self) -> str:
         """Convert to markdown format."""
         sections = []
