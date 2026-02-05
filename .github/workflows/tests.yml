@@ -1,0 +1,130 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop, improve-testing ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  syntax-validation:
+    name: Python Syntax & Import Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+      
+      - name: Check Python syntax
+        run: |
+          python -m py_compile samantha-llm
+          echo "✓ Python syntax is valid"
+      
+      - name: Test script execution
+        run: |
+          python samantha-llm --help || python samantha-llm help
+          echo "✓ Script can be executed"
+      
+      - name: Validate version format
+        run: |
+          python << 'EOF'
+          import re, sys
+          content = open('samantha-llm').read()
+          match = re.search(r'VERSION\s*=\s*["\']([0-9.]+)["\']', content)
+          version = match.group(1) if match else 'NOT_FOUND'
+          print(f'Found version: {version}')
+          if not re.match(r'^[0-9]+\.[0-9]+\.[0-9]+$', version):
+              print(f'Version format is invalid: {version}')
+              sys.exit(1)
+          print('Version format is valid (semver)')
+          EOF
+
+  installation-tests:
+    name: Installation Tests - ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.8'
+            shell: bash
+          - os: ubuntu-latest
+            python-version: '3.12'
+            shell: bash
+          - os: macos-latest
+            python-version: '3.11'
+            shell: bash
+          - os: windows-latest
+            python-version: '3.11'
+            shell: pwsh
+    
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Test installation (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          # Make script executable
+          chmod +x samantha-llm
+
+          # Test that help command works
+          ./samantha-llm help
+
+          echo "✓ Installation script executed successfully on ${{ matrix.os }}"
+
+      - name: Test installation (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # Test that help command works
+          python samantha-llm help
+          
+          Write-Host "✓ Installation script executed successfully on ${{ matrix.os }}"
+      
+      - name: Verify Python compatibility
+        run: |
+          python --version
+          python -c "import sys; print(f'Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+          echo "✓ Python ${{ matrix.python-version }} is compatible"
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Run existing unit tests
+        run: |
+          cd .ai-cerebrum 2>/dev/null || cd .
+          
+          # Find and run test files
+          if ls test_*.py 1> /dev/null 2>&1; then
+            echo "Running unit tests..."
+            python -m unittest discover -s . -p "test_*.py" -v
+            echo "✓ All unit tests passed"
+          else
+            echo "⚠ No test files found (test_*.py)"
+            echo "This is expected if tests are in .ai-cerebrum (which is gitignored)"
+          fi
