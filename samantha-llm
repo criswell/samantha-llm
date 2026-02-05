@@ -13,6 +13,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -22,6 +23,92 @@ FILENAME = os.path.basename(__file__)
 
 # Version
 VERSION = "0.4.1"
+
+# Subconscious analysis prompt template
+ANALYSIS_PROMPT_TEMPLATE = """You are analyzing a terminal recording of a conversation between a user and an AI coding assistant (Claude, Copilot, or Abacus.ai). Your goal is to extract meaningful insights that will help the AI assistant better understand the user's work patterns, preferences, and context in future sessions.
+
+The conversation text has been cleaned of ANSI codes and formatting, but preserves the actual dialogue and actions taken.
+
+## Your Task
+
+Analyze the conversation and extract insights in the following categories:
+
+### 1. Patterns
+Identify recurring workflows, common tasks, or repeated behaviors. Examples:
+- "User frequently uses Task tool to track multi-step work"
+- "User prefers to review plans before implementation"
+- "User often asks for multiple options before deciding"
+
+### 2. Decisions
+Document architectural choices, technical decisions, and trade-offs discussed. Include rationale when available. Examples:
+- "Decided to use JSON over YAML for config (better programmatic access)"
+- "Chose to implement Claude first, then adapt to other agents (validate quality before compatibility)"
+- "Opted for plain text parsing over JSON schema (works across all agents)"
+
+### 3. TODOs
+Extract action items, follow-ups, or deferred work mentioned during the conversation. Examples:
+- "Test subconscious worker with real terminal recordings"
+- "Add Abacus analyzer after Claude is working"
+- "Consider extracting bricklayer into separate package (Q2 2026)"
+
+### 4. Preferences
+Identify the user's working style, preferences, or dislikes. Examples:
+- "User prefers starting with simple solutions before optimizing"
+- "User values thorough research and analysis before implementation"
+- "User likes having escape hatches (e.g., reset commands for customizations)"
+
+### 5. Learnings
+Capture new knowledge, discoveries, or insights gained during the session. Examples:
+- "Discovered that Copilot doesn't support JSON output, only plain text"
+- "Learned that each LLM has different permission models (tool-based vs path-based)"
+- "Found that terminal recordings can be parsed to extract session metadata"
+
+## Output Format
+
+Provide your analysis in the following structured markdown format:
+
+```markdown
+# Conversation Analysis
+
+## Patterns
+- [Pattern description]
+- [Pattern description]
+
+## Decisions
+- [Decision]: [Rationale]
+- [Decision]: [Rationale]
+
+## TODOs
+- [ ] [Action item]
+- [ ] [Action item]
+
+## Preferences
+- [Preference]: [Context]
+- [Preference]: [Context]
+
+## Learnings
+- [Learning]: [Details]
+- [Learning]: [Details]
+
+## Summary
+[2-3 sentence summary of the session and its significance]
+```
+
+## Guidelines
+
+- Be concise but specific
+- Focus on insights that would be useful in future sessions
+- If a category has no relevant items, write "None identified" instead of leaving it empty
+- Prioritize quality over quantity (3-5 good items per category is better than 10 mediocre ones)
+- Include enough context so the insights make sense without reading the full conversation
+- For technical decisions, capture the "why" not just the "what"
+
+## The Conversation to Analyze
+
+The terminal recording text follows below. Remember: extract insights, not a transcript.
+
+---
+"""
 
 # ANSI color codes
 class Colors:
@@ -247,6 +334,62 @@ def create_config():
     return write_config(config)
 
 
+def get_subconscious_prompt_path():
+    """Get path to subconscious analysis prompt"""
+    config_dir = get_config_dir()
+    return config_dir / 'subconscious' / 'analysis-prompt.txt'
+
+
+def ensure_subconscious_prompt():
+    """Ensure subconscious analysis prompt exists, create if missing"""
+    prompt_path = get_subconscious_prompt_path()
+
+    # Create directory if needed
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write prompt if doesn't exist
+    if not prompt_path.exists():
+        print_info(f"Creating subconscious analysis prompt: {prompt_path}")
+        prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE)
+
+        # Also create README
+        readme_path = prompt_path.parent / 'README.md'
+        readme_content = """# Subconscious Analysis Prompt
+
+This directory contains the system prompt used by the subconscious worker to analyze conversation recordings.
+
+## Files
+
+- `analysis-prompt.txt` - The prompt used for LLM analysis
+
+## Customization
+
+You can modify `analysis-prompt.txt` to customize how the subconscious analyzes your conversations. The prompt defines what insights are extracted (patterns, decisions, TODOs, preferences, learnings) and the output format.
+
+## Restoring Default
+
+If you break the prompt or want to restore the default:
+
+```bash
+samantha-llm subconscious reset-prompt
+```
+
+This will restore the original prompt template.
+"""
+        readme_path.write_text(readme_content)
+
+    return prompt_path
+
+
+def reset_subconscious_prompt():
+    """Reset subconscious analysis prompt to default"""
+    prompt_path = get_subconscious_prompt_path()
+
+    print_info(f"Resetting subconscious analysis prompt to default")
+    prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE)
+    print_success(f"Prompt reset: {prompt_path}")
+
+
 def install_unix():
     """Install on Unix-like systems (Linux, macOS) using symlink"""
     install_dir = get_install_dir()
@@ -360,6 +503,9 @@ def cmd_install(args):
     if not create_config():
         print_error("Failed to create config file")
         return 1
+
+    # Ensure subconscious prompt exists
+    ensure_subconscious_prompt()
 
     # Platform-specific installation
     system = get_platform()
@@ -558,6 +704,107 @@ def cmd_status(args):
     return 0
 
 
+def cmd_subconscious(args):
+    """Subconscious command - view subconscious status and guidance"""
+    config = read_config()
+    if not config or 'repo_path' not in config:
+        print_error("samantha-llm is not installed")
+        print_info("Run 'samantha-llm install' first")
+        return 1
+
+    repo_path = Path(config['repo_path'])
+    subconscious_dir = repo_path / '.ai' / 'subconscious' / '.ai'
+
+    # Handle subcommands
+    if hasattr(args, 'subcommand') and args.subcommand:
+        subcommand = args.subcommand
+    else:
+        # Default: show status
+        subcommand = 'status'
+
+    if subcommand == 'status':
+        # Show subconscious status
+        print("Subconscious Status:")
+        print("=" * 50)
+        print()
+
+        # Check if worker is running
+        is_running, estimated_remaining = check_worker_running(repo_path)
+        if is_running:
+            print_warning(f"Worker running (~{estimated_remaining}s remaining)")
+        else:
+            print_success("No worker running")
+
+        # Check for guidance file
+        guidance_file = subconscious_dir / 'guidance.md'
+        if guidance_file.exists():
+            print_info(f"Guidance file: {guidance_file}")
+            print_info(f"  Last updated: {datetime.fromtimestamp(guidance_file.stat().st_mtime)}")
+        else:
+            print_info("No guidance file yet")
+
+        # Check processing log
+        log_file = subconscious_dir / 'processing.log'
+        if log_file.exists():
+            # Show last few log entries
+            with open(log_file) as f:
+                lines = f.readlines()
+                if lines:
+                    print()
+                    print_info("Recent processing activity:")
+                    for line in lines[-5:]:
+                        print(f"  {line.rstrip()}")
+
+        print()
+        return 0
+
+    elif subcommand == 'guidance':
+        # Show guidance file
+        guidance_file = subconscious_dir / 'guidance.md'
+        if not guidance_file.exists():
+            print_warning("No guidance file found")
+            print_info("Guidance will be generated after your first session")
+            return 0
+
+        print("Subconscious Guidance:")
+        print("=" * 50)
+        print()
+        with open(guidance_file) as f:
+            print(f.read())
+        return 0
+
+    elif subcommand == 'wait':
+        # Wait for worker to finish
+        is_running, _ = check_worker_running(repo_path)
+        if not is_running:
+            print_info("No worker running")
+            return 0
+
+        print_info("Waiting for worker to finish...")
+        wait_for_worker(repo_path, timeout=60)
+        print_success("Worker finished")
+        return 0
+
+    elif subcommand == 'reset-prompt':
+        # Reset analysis prompt to default
+        print_warning("This will reset your subconscious analysis prompt to the default.")
+        print_info("Any customizations will be lost.")
+        print()
+
+        response = input("Continue? [y/N] ")
+        if response.lower() not in ['y', 'yes']:
+            print_info("Cancelled.")
+            return 0
+
+        reset_subconscious_prompt()
+        return 0
+
+    else:
+        print_error(f"Unknown subcommand: {subcommand}")
+        print_info("Available subcommands: status, guidance, wait, reset-prompt")
+        return 1
+
+
 def cmd_help(args):
     """Help command"""
     print("""samantha-llm - Samantha Hartwell LLM Management Tool
@@ -571,6 +818,15 @@ Usage:
     samantha-llm start [AGENT]     Start a Samantha Hartwell session (uses default agent if not specified)
     samantha-llm link              Link current directory to samantha-llm (create .ai-cerebrum symlink)
     samantha-llm unlink            Unlink current directory from samantha-llm (remove .ai-cerebrum symlink)
+    samantha-llm qmd install       Install qmd (memory search engine) and dependencies
+    samantha-llm qmd status        Show qmd installation status
+    samantha-llm qmd check         Quick check if qmd is available
+    samantha-llm memories index    Index cerebrum files for semantic search
+    samantha-llm memories search   Search memories with semantic/keyword search
+    samantha-llm subconscious status       Show subconscious worker status
+    samantha-llm subconscious guidance     Show conversation analysis guidance
+    samantha-llm subconscious wait         Wait for worker to finish processing
+    samantha-llm subconscious reset-prompt Reset analysis prompt to default
     samantha-llm status            Show installation status and configuration
     samantha-llm version           Show version information
     samantha-llm help              Show this help message
@@ -919,6 +1175,248 @@ def cmd_agents(args):
     return 0
 
 
+# ============================================================================
+# Subconscious Worker Functions
+# ============================================================================
+
+def get_lockfile_path(repo_path: Path) -> Path:
+    """Get path to subconscious worker lock file."""
+    return repo_path / '.ai' / 'subconscious' / '.ai' / '.processing.lock'
+
+
+def check_worker_running(repo_path: Path) -> tuple:
+    """
+    Check if subconscious worker is running.
+
+    Returns:
+        (is_running, estimated_seconds_remaining)
+    """
+    lockfile = get_lockfile_path(repo_path)
+
+    if not lockfile.exists():
+        return (False, 0)
+
+    # Estimate time remaining based on lock file age
+    elapsed = time.time() - lockfile.stat().st_mtime
+    estimated_remaining = max(0, 30 - elapsed)  # Assume 30 second processing time
+
+    return (True, int(estimated_remaining))
+
+
+def wait_for_worker(repo_path: Path, timeout: int = 60):
+    """
+    Wait for subconscious worker to finish.
+
+    Args:
+        repo_path: Path to repository
+        timeout: Maximum seconds to wait
+    """
+    lockfile = get_lockfile_path(repo_path)
+
+    start = time.time()
+    while lockfile.exists():
+        if time.time() - start > timeout:
+            print_warning(f"Timeout waiting for memory processing ({timeout}s)")
+            # Remove stale lock
+            try:
+                lockfile.unlink()
+            except:
+                pass
+            break
+        time.sleep(0.5)
+
+
+def prompt_for_worker_wait(repo_path: Path) -> bool:
+    """
+    Prompt user whether to wait for running worker.
+
+    Returns:
+        True if user wants to wait, False otherwise
+    """
+    is_running, estimated_remaining = check_worker_running(repo_path)
+
+    if not is_running:
+        return False
+
+    print()
+    print_warning("Memory processing from previous session is still running.")
+    print()
+    print("Would you like to:")
+    print(f"  [1] Wait for processing to complete (~{estimated_remaining}s remaining)")
+    print("  [2] Start now (new memories will be available next session)")
+    print()
+
+    choice = input("Choice [1/2]: ").strip()
+
+    if choice == '1':
+        print()
+        print_info("⏳ Waiting for memory processing...")
+        wait_for_worker(repo_path, timeout=60)
+        print_success("✓ Memories updated")
+        print()
+        return True
+    else:
+        print()
+        print_info("→ Starting session (processing will continue in background)")
+        print()
+        return False
+
+
+def spawn_subconscious_worker(transcript_file: Path, cerebrum_path: Path):
+    """
+    Spawn background worker to process transcript.
+
+    Args:
+        transcript_file: Path to transcript file
+        cerebrum_path: Path to cerebrum root
+    """
+    worker_script = cerebrum_path / 'subconscious_worker.py'
+
+    if not worker_script.exists():
+        # Worker script not found, skip processing
+        return
+
+    # Prepare worker command
+    cmd = [
+        sys.executable,  # Python interpreter
+        str(worker_script),
+        str(transcript_file),
+        str(cerebrum_path)
+    ]
+
+    # Platform-specific spawning
+    try:
+        if sys.platform == 'win32':
+            # Windows: Use DETACHED_PROCESS flag
+            DETACHED_PROCESS = 0x00000008
+            subprocess.Popen(
+                cmd,
+                creationflags=DETACHED_PROCESS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True
+            )
+        else:
+            # Unix (Linux/Mac): Use start_new_session
+            subprocess.Popen(
+                cmd,
+                start_new_session=True,  # Detach from parent
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True
+            )
+    except Exception as e:
+        # Silently fail - don't interrupt user experience
+        pass
+
+
+# ============================================================================
+# Terminal Recording
+# ============================================================================
+
+def run_agent_with_recording(
+    agent_command: list,
+    cwd: Path,
+    recording_file: Path
+) -> int:
+    """
+    Run agent command with terminal recording.
+
+    Uses platform-specific terminal recording to capture all I/O.
+
+    Args:
+        agent_command: Command to execute (as list)
+        cwd: Working directory
+        recording_file: Path to save terminal recording
+
+    Returns:
+        Exit code from agent
+    """
+    system = get_platform()
+
+    if system == 'windows':
+        # Windows: Use PowerShell Start-Transcript
+        # Note: This captures PowerShell output, not raw terminal
+        ps_command = f"""
+Start-Transcript -Path '{recording_file}' -Force
+try {{
+    & {' '.join(f'"{part}"' if ' ' in part else part for part in agent_command)}
+    exit $LASTEXITCODE
+}} finally {{
+    Stop-Transcript
+}}
+"""
+        cmd = ['powershell', '-NoProfile', '-Command', ps_command]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            return result.returncode
+        except Exception as e:
+            print_error(f"Failed to execute agent with recording: {e}")
+            return 1
+
+    else:
+        # Unix/Mac: Use 'script' command
+        # -q: Quiet (no start/done messages)
+        # -c: Command to run
+        # Note: -f/--flush flag varies by version, so we omit it
+
+        # Build command string for script
+        import shlex
+        cmd_string = ' '.join(shlex.quote(part) for part in agent_command)
+
+        cmd = [
+            'script',
+            '-q',           # Quiet mode (widely supported)
+            '-c',
+            cmd_string,
+            str(recording_file)
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            return result.returncode
+        except FileNotFoundError:
+            print_error("'script' command not found")
+            print_info("Terminal recording requires 'script' (usually in util-linux package)")
+            print_info("Falling back to execution without recording...")
+
+            # Fallback: run without recording
+            try:
+                result = subprocess.run(
+                    agent_command,
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                    cwd=str(cwd)
+                )
+                return result.returncode
+            except Exception as e:
+                print_error(f"Failed to execute agent: {e}")
+                return 1
+        except Exception as e:
+            print_error(f"Failed to execute agent with recording: {e}")
+            return 1
+
+
+# ============================================================================
+# Session Commands
+# ============================================================================
+
 def cmd_start(args):
     """Start command - begin a Samantha Hartwell LLM session in current workspace"""
     cwd = Path.cwd()
@@ -1007,6 +1505,9 @@ def cmd_start(args):
         print_info("Please remove it manually before starting a session")
         return 1
 
+    # Check for running subconscious worker and prompt user
+    prompt_for_worker_wait(repo_path)
+
     # Read bootstrap file
     bootstrap_path = repo_path / bootstrap_file
     if not bootstrap_path.exists():
@@ -1020,35 +1521,113 @@ def cmd_start(args):
         print_error(f"Failed to read bootstrap file: {e}")
         return 1
 
+    # Set up transcript capture
+    try:
+        # Import transcript capture module
+        transcript_module_path = repo_path / 'transcript_capture.py'
+        if transcript_module_path.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("transcript_capture", transcript_module_path)
+            transcript_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(transcript_module)
+
+            # Create transcript capture
+            transcript = transcript_module.TranscriptCapture(agent_name, cwd)
+            transcript.start_session()
+            has_transcript = True
+        else:
+            has_transcript = False
+            transcript = None
+    except Exception as e:
+        # Transcript capture failed, continue without it
+        has_transcript = False
+        transcript = None
+
     # Prepare agent command
     # Parse command string (handle spaces in command)
     import shlex
     cmd_parts = shlex.split(agent_command)
     cmd_parts.append(bootstrap_content)
 
+    # Create terminal recording file
+    import tempfile
+    recording_file = None
+    if has_transcript:
+        # Store recording next to transcript for processing
+        temp_dir = tempfile.gettempdir()
+        session_id = transcript.session_id if transcript else datetime.now().strftime("%Y%m%d_%H%M%S")
+        recording_file = Path(temp_dir) / f'terminal_{session_id}.txt'
+
     print()
     print_info(f"Starting Samantha Hartwell session with agent '{agent_name}'")
     print_info(f"  Workspace: {cwd}")
     print_info(f"  Command: {agent_command}")
+    if has_transcript:
+        print_info(f"  Transcript: Capturing conversation (subconscious enabled)")
     print()
 
-    # Execute agent command with bootstrap content
-    try:
-        result = subprocess.run(
-            cmd_parts,
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            cwd=str(cwd)
-        )
-        exit_code = result.returncode
-    except FileNotFoundError:
-        print_error(f"Agent command not found: {agent_command}")
-        print_info("Make sure the agent is installed and in your PATH")
-        exit_code = 127
-    except Exception as e:
-        print_error(f"Failed to execute agent: {e}")
-        exit_code = 1
+    # Record session start time
+    session_start_time = time.time()
+
+    # Execute agent command with terminal recording
+    if recording_file:
+        exit_code = run_agent_with_recording(cmd_parts, cwd, recording_file)
+    else:
+        # Fallback: run without recording
+        try:
+            result = subprocess.run(
+                cmd_parts,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            exit_code = result.returncode
+        except FileNotFoundError:
+            print_error(f"Agent command not found: {agent_command}")
+            print_info("Make sure the agent is installed and in your PATH")
+            exit_code = 127
+        except Exception as e:
+            print_error(f"Failed to execute agent: {e}")
+            exit_code = 1
+
+    # Record session end and spawn worker
+    if has_transcript and transcript:
+        try:
+            session_duration = time.time() - session_start_time
+            transcript.end_session(session_duration)
+            transcript_file = transcript.close()
+
+            # Save transcript to cerebrum
+            saved_transcript = transcript_module.save_transcript_to_cerebrum(
+                transcript_file,
+                repo_path
+            )
+
+            # Save terminal recording to cerebrum if it exists
+            if recording_file and recording_file.exists():
+                # Create recordings directory
+                recordings_dir = repo_path / '.ai' / 'subconscious' / '.ai' / 'recordings'
+                recordings_dir.mkdir(parents=True, exist_ok=True)
+
+                # Move recording to cerebrum
+                target_recording = recordings_dir / recording_file.name
+                shutil.move(str(recording_file), str(target_recording))
+
+                print()
+                print_info("📝 Session transcript saved")
+                print_info("📼 Terminal recording saved")
+            else:
+                print()
+                print_info("📝 Session transcript saved")
+
+            # Spawn subconscious worker
+            spawn_subconscious_worker(saved_transcript, repo_path)
+            print_info("🧠 Memory processing started in background")
+
+        except Exception as e:
+            # Failed to save transcript or spawn worker, continue anyway
+            pass
 
     # Cleanup auto-linked workspace
     if auto_linked and not is_manual_link:
@@ -1069,6 +1648,555 @@ def cmd_start(args):
     return exit_code
 
 
+# ============================================================================
+# QMD Commands
+# ============================================================================
+
+def is_command_available(command):
+    """Check if a command is available on PATH"""
+    return shutil.which(command) is not None
+
+
+def is_bun_installed():
+    """Check if Bun runtime is installed"""
+    return is_command_available('bun')
+
+
+def get_qmd_local_dir():
+    """Get local qmd installation directory"""
+    return Path.home() / '.local' / 'share' / 'samantha-llm' / 'qmd'
+
+
+def get_qmd_bin_path():
+    """Get path to qmd binary (global or local)"""
+    # Check global install first
+    global_bin = shutil.which('qmd')
+    if global_bin:
+        return global_bin
+
+    # Check bun global install (~/node_modules/qmd/qmd)
+    bun_global = Path.home() / 'node_modules' / 'qmd' / 'qmd'
+    if bun_global.exists() and os.access(bun_global, os.X_OK):
+        return str(bun_global)
+
+    # Check local install
+    local_bin = get_qmd_local_dir() / 'node_modules' / 'qmd' / 'qmd'
+    if local_bin.exists() and os.access(local_bin, os.X_OK):
+        return str(local_bin)
+
+    # Also check .bin directories
+    local_bin_dir = get_qmd_local_dir() / 'node_modules' / '.bin' / 'qmd'
+    if local_bin_dir.exists() and os.access(local_bin_dir, os.X_OK):
+        return str(local_bin_dir)
+
+    return None
+
+
+def is_qmd_installed():
+    """Check if qmd is installed (global or local)"""
+    return get_qmd_bin_path() is not None
+
+
+def get_qmd_models_dir():
+    """Get qmd models directory"""
+    return Path.home() / '.cache' / 'qmd' / 'models'
+
+
+def get_qmd_config_file():
+    """Get qmd config file path"""
+    return get_config_dir() / 'qmd-config.json'
+
+
+def install_bun():
+    """Install Bun runtime"""
+    print_info("Installing Bun runtime...")
+
+    system = get_platform()
+
+    if system == 'windows':
+        print_error("Windows is not yet supported for automatic Bun installation")
+        print_info("Please install Bun manually: https://bun.sh/docs/installation")
+        print_info("Or use WSL (Windows Subsystem for Linux)")
+        return False
+
+    # Use official Bun installer for Linux and macOS
+    install_cmd = "curl -fsSL https://bun.sh/install | bash"
+
+    print_info("Running: curl -fsSL https://bun.sh/install | bash")
+    print_warning("This will download and install Bun to ~/.bun")
+
+    try:
+        result = subprocess.run(
+            install_cmd,
+            shell=True,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            print_error(f"Bun installation failed: {result.stderr}")
+            return False
+
+        print_success("Bun installed successfully")
+
+        # Check if Bun is now in PATH
+        if not is_bun_installed():
+            print_warning("Bun installed but not found in PATH")
+            print_info("You may need to restart your shell or run:")
+            print_info("  source ~/.bashrc  (or ~/.zshrc)")
+            bun_path = Path.home() / '.bun' / 'bin'
+            print_info(f"  Or add to PATH: export PATH=\"{bun_path}:$PATH\"")
+            return False
+
+        return True
+
+    except Exception as e:
+        print_error(f"Failed to install Bun: {e}")
+        return False
+
+
+def install_qmd():
+    """Install qmd via Bun (try global first, fall back to local)"""
+    print_info("Installing qmd from github:tobi/qmd...")
+
+    if not is_bun_installed():
+        print_error("Bun is not installed. Install Bun first with: samantha-llm qmd install-bun")
+        return False
+
+    install_type = None
+
+    # Try global install first
+    print_info("Attempting global install...")
+    try:
+        result = subprocess.run(
+            ['bun', 'install', '-g', 'github:tobi/qmd'],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            print_success("Global install successful")
+            install_type = "global"
+        else:
+            print_warning(f"Global install failed: {result.stderr.strip()}")
+            print_info("Falling back to local install...")
+
+    except Exception as e:
+        print_warning(f"Global install failed: {e}")
+        print_info("Falling back to local install...")
+
+    # Try local install if global failed
+    if install_type is None:
+        local_dir = get_qmd_local_dir()
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            result = subprocess.run(
+                ['bun', 'install', 'github:tobi/qmd'],
+                cwd=str(local_dir),
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                print_error(f"Local install failed: {result.stderr}")
+                return False
+
+            print_success(f"Local install successful: {local_dir}")
+            install_type = "local"
+
+        except Exception as e:
+            print_error(f"Failed to install qmd: {e}")
+            return False
+
+    # Check if qmd is now available
+    qmd_bin = get_qmd_bin_path()
+    if not qmd_bin:
+        print_error("qmd installed but binary not found")
+        print_info("Try running: samantha-llm qmd status")
+        return False
+
+    print_success(f"qmd binary: {qmd_bin}")
+
+    # Create config file
+    config_file = get_qmd_config_file()
+    config_dir = get_config_dir()
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    qmd_config = {
+        "enabled": True,
+        "auto_index": True,
+        "search_mode": "hybrid",
+        "models_path": str(get_qmd_models_dir()),
+        "install_type": install_type,
+        "bin_path": qmd_bin
+    }
+
+    with open(config_file, 'w') as f:
+        json.dump(qmd_config, f, indent=2)
+
+    print_success(f"Created qmd config: {config_file}")
+    print()
+    print_info("qmd will auto-download models (~2GB) on first use")
+    print_info(f"Models will be cached in: {get_qmd_models_dir()}")
+
+    return True
+
+
+def cmd_qmd(args):
+    """Handle qmd subcommands"""
+    subcommand = args.subcommand or 'status'
+
+    if subcommand == 'install':
+        # Install both Bun and qmd
+        print_info("Installing qmd and dependencies...")
+        print()
+
+        # Check if Bun is installed
+        if not is_bun_installed():
+            if not install_bun():
+                print()
+                print_error("Failed to install Bun. Cannot continue with qmd installation.")
+                return 1
+            print()
+        else:
+            print_success("Bun is already installed")
+            print()
+
+        # Install qmd
+        if not install_qmd():
+            return 1
+
+        print()
+        print_success("qmd installation complete!")
+        print()
+        print_info("Next steps:")
+        print_info("  1. Index your cerebrum: samantha-llm memories index")
+        print_info("  2. Search memories: samantha-llm memories search <query>")
+        return 0
+
+    elif subcommand == 'install-bun':
+        # Install only Bun
+        if is_bun_installed():
+            print_success("Bun is already installed")
+            return 0
+
+        if install_bun():
+            return 0
+        return 1
+
+    elif subcommand == 'status':
+        # Show qmd installation status
+        print_info("QMD Installation Status:")
+        print()
+
+        # Check Bun
+        if is_bun_installed():
+            try:
+                result = subprocess.run(['bun', '--version'], capture_output=True, text=True)
+                version = result.stdout.strip()
+                print_success(f"Bun: Installed (version {version})")
+            except:
+                print_success("Bun: Installed")
+        else:
+            print_error("Bun: Not installed")
+            print_info("  Install with: samantha-llm qmd install-bun")
+
+        # Check qmd
+        qmd_bin = get_qmd_bin_path()
+        if qmd_bin:
+            try:
+                result = subprocess.run([qmd_bin, '--version'], capture_output=True, text=True)
+                version = result.stdout.strip() if result.stdout else 'unknown'
+                print_success(f"qmd: Installed (version {version})")
+                print_info(f"  Binary: {qmd_bin}")
+            except:
+                print_success(f"qmd: Installed at {qmd_bin}")
+
+            # Check for models
+            models_dir = get_qmd_models_dir()
+            if models_dir.exists():
+                model_count = len(list(models_dir.glob('*')))
+                if model_count > 0:
+                    print_success(f"Models: {model_count} models downloaded")
+                else:
+                    print_warning("Models: Not yet downloaded (will download on first use)")
+            else:
+                print_warning("Models: Not yet downloaded (will download on first use)")
+        else:
+            print_error("qmd: Not installed")
+            print_info("  Install with: samantha-llm qmd install")
+
+        # Check config
+        config_file = get_qmd_config_file()
+        if config_file.exists():
+            print_success(f"Config: {config_file}")
+        else:
+            print_warning("Config: Not created")
+
+        print()
+
+        if not is_bun_installed() or not is_qmd_installed():
+            print_info("To install qmd, run: samantha-llm qmd install")
+        else:
+            print_success("qmd is ready to use!")
+
+        return 0
+
+    elif subcommand == 'check':
+        # Quick check (exit code 0 if installed, 1 if not)
+        if is_qmd_installed():
+            print_success("qmd is installed and available")
+            return 0
+        else:
+            print_error("qmd is not installed")
+            return 1
+
+    else:
+        print_error(f"Unknown qmd subcommand: {subcommand}")
+        print_info("Available subcommands:")
+        print_info("  install      - Install qmd and dependencies")
+        print_info("  install-bun  - Install only Bun runtime")
+        print_info("  status       - Show installation status")
+        print_info("  check        - Quick check if qmd is available")
+        return 1
+
+
+# ============================================================================
+# Memory Commands
+# ============================================================================
+
+def get_cerebrum_path():
+    """Get path to cerebrum (samantha-llm repo)"""
+    return get_repo_dir()
+
+
+def get_memory_directories():
+    """Get list of memory directories to index"""
+    cerebrum = get_cerebrum_path()
+    return [
+        cerebrum / '.ai' / 'short-term-memory' / '.ai',
+        cerebrum / '.ai' / 'long-term-memory' / '.ai',
+        cerebrum / '.ai' / 'current-tasks' / '.ai',
+        cerebrum / '.ai' / 'work-experience' / '.ai',
+    ]
+
+
+def index_cerebrum():
+    """Index cerebrum files with qmd"""
+    if not is_qmd_installed():
+        print_error("qmd is not installed")
+        print_info("Install with: samantha-llm qmd install")
+        return False
+
+    print_info("Indexing cerebrum files...")
+    print()
+
+    # Get memory directories
+    memory_dirs = get_memory_directories()
+
+    # Check which directories exist
+    existing_dirs = [d for d in memory_dirs if d.exists()]
+
+    if not existing_dirs:
+        print_warning("No memory directories found")
+        print_info("Memory directories checked:")
+        for d in memory_dirs:
+            print_info(f"  {d}")
+        return False
+
+    print_info(f"Found {len(existing_dirs)} memory directories:")
+    for d in existing_dirs:
+        file_count = len(list(d.glob('*.md')))
+        print_info(f"  {d.name}: {file_count} files")
+    print()
+
+    # Get qmd binary path
+    qmd_bin = get_qmd_bin_path()
+    if not qmd_bin:
+        print_error("qmd is not installed")
+        print_info("Install with: samantha-llm qmd install")
+        return False
+
+    collection_name = "samantha-cerebrum"
+
+    print_info(f"Creating/updating collection: {collection_name}")
+    print()
+
+    # Remove existing collection if it exists
+    try:
+        remove_cmd = [qmd_bin, 'collection', 'remove', collection_name]
+        subprocess.run(remove_cmd, capture_output=True, text=True)
+        print_info("Removed existing collection")
+    except:
+        pass  # Collection might not exist yet
+
+    # Index the cerebrum .ai directory once (recursive)
+    cerebrum = get_cerebrum_path()
+    cerebrum_ai = cerebrum / '.ai'
+
+    print_info(f"Indexing cerebrum directory...")
+    print_info(f"  Path: {cerebrum_ai}")
+    print_info(f"  Files: {len(list(cerebrum_ai.rglob('*.md')))} markdown files")
+    print()
+
+    try:
+        cmd = [qmd_bin, 'collection', 'add', str(cerebrum_ai), '--name', collection_name, '--mask', '**/*.md']
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            print_error(f"Indexing failed: {result.stderr.strip()}")
+            return False
+
+        print_success("Indexed cerebrum successfully!")
+
+    except Exception as e:
+        print_error(f"Indexing failed: {e}")
+        return False
+
+    # Add context for the collection
+    try:
+        context_cmd = [
+            qmd_bin, 'context', 'add', '/',
+            'Personal memory system for Samantha Hartwell, an AI software engineer. Contains memories of past work, technical decisions, and ongoing projects.'
+        ]
+        subprocess.run(context_cmd, capture_output=True, text=True)
+        print_info("Added context metadata")
+    except:
+        pass  # Context is optional
+
+    print()
+    print_success("Cerebrum indexing complete!")
+    print_info(f"Collection: {collection_name}")
+    print_info("Use: samantha-llm memories search \"<query>\"")
+
+    return True
+
+
+def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filters=None):
+    """Search memories using qmd"""
+    qmd_bin = get_qmd_bin_path()
+    if not qmd_bin:
+        print_error("qmd is not installed")
+        print_info("Install with: samantha-llm qmd install")
+        return False
+
+    collection_name = "samantha-cerebrum"
+
+    # Build qmd command based on mode
+    if mode == 'keyword':
+        cmd = [qmd_bin, 'search', query]
+    elif mode == 'semantic':
+        cmd = [qmd_bin, 'vsearch', query]
+    else:  # hybrid (default)
+        cmd = [qmd_bin, 'query', query]
+
+    # Add collection filter
+    cmd.extend(['-c', collection_name])
+
+    # Add limit
+    cmd.extend(['-n', str(limit)])
+
+    # Add format
+    if format_type == 'json':
+        cmd.append('--json')
+    elif format_type == 'plain':
+        cmd.append('--text')
+    # markdown is default for qmd
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            if 'not found' in result.stderr.lower() or 'does not exist' in result.stderr.lower():
+                print_error(f"Collection '{collection_name}' not found")
+                print_info("Index your cerebrum first: samantha-llm memories index")
+            else:
+                print_error(f"Search failed: {result.stderr}")
+            return False
+
+        # Output results
+        output = result.stdout.strip()
+        if not output or output == '[]':
+            print_warning("No results found")
+            print_info(f"Query: {query}")
+            print_info(f"Mode: {mode}")
+            return True
+
+        # Apply filters if provided (post-processing)
+        # For now, just output the results - full filtering can be added later
+        print(output)
+
+        return True
+
+    except Exception as e:
+        print_error(f"Search failed: {e}")
+        return False
+
+
+def cmd_memories(args):
+    """Handle memory commands"""
+    subcommand = args.subcommand or 'help'
+
+    if subcommand == 'index':
+        # Index cerebrum files
+        if index_cerebrum():
+            print()
+            print_info("Next steps:")
+            print_info("  - Search memories: samantha-llm memories search <query>")
+            print_info("  - Check status: qmd list samantha-cerebrum")
+            return 0
+        return 1
+
+    elif subcommand == 'search':
+        # Parse remaining arguments for search
+        # Get query from args.agent (since we're reusing that field)
+        query = args.agent
+        if not query:
+            print_error("Query required for search")
+            print_info("Usage: samantha-llm memories search <query>")
+            print_info("Example: samantha-llm memories search 'testing workflows'")
+            return 1
+
+        # For now, use defaults (can be enhanced with proper arg parsing later)
+        mode = 'hybrid'
+        format_type = 'markdown'
+        limit = 10
+
+        if search_memories(query, mode, format_type, limit):
+            return 0
+        return 1
+
+    elif subcommand == 'help' or subcommand not in ['index', 'search']:
+        # Show help
+        print_info("Memory management commands:")
+        print()
+        print_info("  samantha-llm memories index           - Index cerebrum files for searching")
+        print_info("  samantha-llm memories search <query>  - Search memories semantically")
+        print()
+        print_info("Examples:")
+        print_info("  samantha-llm memories index")
+        print_info("  samantha-llm memories search 'testing workflows'")
+        print_info("  samantha-llm memories search 'API design patterns'")
+        print()
+        print_info("Search modes:")
+        print_info("  Default: hybrid (keyword + semantic + AI re-ranking)")
+        print_info("  Use qmd directly for advanced options (--keyword, --semantic)")
+        return 0
+
+    else:
+        print_error(f"Unknown memories subcommand: {subcommand}")
+        return 1
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -1077,8 +2205,10 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'help', 'version'],
                         help='Command to execute')
+    parser.add_argument('subcommand', nargs='?', default=None,
+                        help='Subcommand (for qmd command)')
     parser.add_argument('agent', nargs='?', default=None,
                         help='Agent name (for start command)')
     parser.add_argument('--default', dest='default_agent', metavar='AGENT',
@@ -1095,6 +2225,9 @@ def main():
         'setup': cmd_setup,
         'agents': cmd_agents,
         'start': cmd_start,
+        'qmd': cmd_qmd,
+        'memories': cmd_memories,
+        'subconscious': cmd_subconscious,
         'help': cmd_help,
         'version': cmd_version,
     }

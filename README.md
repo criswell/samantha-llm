@@ -66,9 +66,15 @@ The installer will:
 
 After installation:
 - `samantha-llm status` - Check installation status and configuration
-- `samantha-llm version` - Show version and platform information
-- `samantha-llm uninstall` - Remove the installation
+- `samantha-llm setup` - Configure an agent for LLM sessions
+- `samantha-llm start` - Start a Samantha Hartwell session
+- `samantha-llm link/unlink` - Manage workspace symlinks
+- `samantha-llm qmd install` - Install memory search engine
+- `samantha-llm memories index` - Index memories for searching
+- `samantha-llm memories search` - Search memories semantically
 - `samantha-llm help` - Show available commands
+
+**See [COMMANDS.md](COMMANDS.md) for complete command reference.**
 
 ### PATH Configuration
 
