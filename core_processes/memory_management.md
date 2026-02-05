@@ -352,3 +352,74 @@ When initializing, the bootstrap process should surface memories in this priorit
 - These provide recent context that may be relevant
 
 This tiered approach ensures critical information is never missed while keeping bootstrap time reasonable.
+
+# Project State Tracking
+
+The subconscious system automatically analyzes session transcripts to detect when project state may have changed. Instead of automatically updating the `current-tasks` index, it generates **draft project updates** for user review.
+
+## How It Works
+
+1. **Detection**: After each session, the subconscious worker analyzes:
+   - LLM analysis results (decisions, patterns, summary)
+   - Terminal recording data (test results, git commits, deployments)
+   - User statements about progress or completion
+
+2. **Draft Generation**: When changes are detected, the system creates a pending update file in:
+   ```
+   .ai-cerebrum/.ai/current-tasks/.ai/pending-updates/{session_id}_{project_name}.json
+   ```
+
+3. **User Review**: Users review and apply updates using:
+   ```bash
+   samantha-llm projects review
+   ```
+
+## Pending Update Format
+
+Each pending update contains:
+- **session_id**: Session identifier (YYYYMMDD_HHMMSS)
+- **session_date**: Date of session
+- **project_name**: Name of affected project
+- **confidence**: high/medium/low based on evidence strength
+- **proposed_changes**: Suggested updates to status, recent_progress, summary
+- **reasoning**: Why these changes are proposed
+- **evidence**: List of supporting evidence (user statements, test results, commits)
+
+## Confidence Levels
+
+- **high**: 5+ pieces of evidence (explicit statements, test results, commits)
+- **medium**: 3-4 pieces of evidence (moderate indicators)
+- **low**: 1-2 pieces of evidence (weak signals)
+
+## Review Commands
+
+**Check project status:**
+```bash
+samantha-llm projects status
+```
+Shows active/completed projects and count of pending updates.
+
+**Review pending updates:**
+```bash
+samantha-llm projects review
+```
+Interactive review process:
+- Shows each pending update with evidence
+- User can apply, skip, or skip all
+- Applied updates modify `current-tasks/index.json`
+- Applied update files are deleted
+
+## Bootstrap Integration
+
+During bootstrap (Step 4), the system checks for pending updates:
+- Non-blocking notification if updates exist
+- Suggests running `samantha-llm projects review` when convenient
+- Does not interrupt the bootstrap process
+
+## Design Principles
+
+- **Non-blocking**: Never interrupts workflow
+- **User control**: All updates require explicit approval
+- **Graceful degradation**: System works fine if updates are never reviewed
+- **Low friction**: Simple commands, clear evidence presentation
+- **Discoverability**: Bootstrap notification ensures users know about pending updates

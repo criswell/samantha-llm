@@ -56,6 +56,19 @@ try:
 except Exception:
     HAS_CHUNKER = False
 
+# Import project state analyzer if available
+try:
+    project_analyzer_path = Path(__file__).parent / 'project_state_analyzer.py'
+    if project_analyzer_path.exists():
+        spec = importlib.util.spec_from_file_location("project_state_analyzer", project_analyzer_path)
+        project_state_analyzer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(project_state_analyzer)
+        HAS_PROJECT_ANALYZER = True
+    else:
+        HAS_PROJECT_ANALYZER = False
+except Exception:
+    HAS_PROJECT_ANALYZER = False
+
 
 def log(log_file: Path, message: str):
     """Write to processing log."""
@@ -578,6 +591,38 @@ def main():
                 log(log_file, f"[MEMORY] Failed to create memory file: {e}")
                 import traceback
                 log(log_file, f"[MEMORY] {traceback.format_exc()}")
+
+        # Phase 5: Project state tracking (if analyzer available)
+        if HAS_PROJECT_ANALYZER and llm_analysis:
+            try:
+                analyzer = project_state_analyzer.create_analyzer(cerebrum_path)
+
+                # Extract workspace from analysis
+                workspace_path = Path(analysis.get('workspace', 'unknown'))
+
+                # Analyze session for project state changes
+                updates = analyzer.analyze_session(
+                    session_id=analysis['session_id'],
+                    workspace=workspace_path,
+                    analysis_result=analysis_result if 'analysis_result' in locals() else None,
+                    terminal_data=terminal_data,
+                    llm_analysis=llm_analysis
+                )
+
+                # Save pending updates
+                for update in updates:
+                    update_file = analyzer.save_pending_update(update)
+                    log(log_file, f"[PROJECT] Saved pending update: {update_file.name} (confidence: {update.confidence})")
+
+                if updates:
+                    log(log_file, f"[PROJECT] Generated {len(updates)} pending project update(s)")
+                else:
+                    log(log_file, "[PROJECT] No project state changes detected")
+
+            except Exception as e:
+                log(log_file, f"[PROJECT] Failed to analyze project state: {e}")
+                import traceback
+                log(log_file, f"[PROJECT] {traceback.format_exc()}")
 
         # Generate guidance (with LLM insights if available)
         guidance_file = generate_guidance_basic(cerebrum_path, analysis, llm_analysis)

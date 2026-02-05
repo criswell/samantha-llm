@@ -381,6 +381,35 @@ This will restore the original prompt template.
     return prompt_path
 
 
+def ensure_cerebrum_structure():
+    """Ensure cerebrum directory structure exists for fresh installations"""
+    repo_dir = get_repo_dir()
+    cerebrum_path = repo_dir / '.ai-cerebrum' / '.ai'
+
+    # Core directories that should exist
+    directories = [
+        cerebrum_path / 'short-term-memory' / '.ai',
+        cerebrum_path / 'long-term-memory' / '.ai',
+        cerebrum_path / 'current-tasks' / '.ai' / 'pending-updates',
+        cerebrum_path / 'work-experience' / '.ai',
+        cerebrum_path / 'subconscious' / '.ai',
+    ]
+
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+
+    # Create index files if they don't exist
+    short_term_index = cerebrum_path / 'short-term-memory' / '.ai' / 'index.json'
+    if not short_term_index.exists():
+        short_term_index.write_text('{"memories": [], "critical_memories": []}\n')
+
+    current_tasks_index = cerebrum_path / 'current-tasks' / '.ai' / 'index.json'
+    if not current_tasks_index.exists():
+        current_tasks_index.write_text('{"active": [], "recently_completed": [], "last_updated": ""}\n')
+
+    print_info(f"Cerebrum structure initialized: {cerebrum_path}")
+
+
 def reset_subconscious_prompt():
     """Reset subconscious analysis prompt to default"""
     prompt_path = get_subconscious_prompt_path()
@@ -506,6 +535,9 @@ def cmd_install(args):
 
     # Ensure subconscious prompt exists
     ensure_subconscious_prompt()
+
+    # Ensure cerebrum directory structure exists
+    ensure_cerebrum_structure()
 
     # Platform-specific installation
     system = get_platform()
@@ -823,6 +855,8 @@ Usage:
     samantha-llm qmd check         Quick check if qmd is available
     samantha-llm memories index    Index cerebrum files for semantic search
     samantha-llm memories search   Search memories with semantic/keyword search
+    samantha-llm projects status   Show overview of active/completed projects
+    samantha-llm projects review   Review and apply pending project updates
     samantha-llm subconscious status       Show subconscious worker status
     samantha-llm subconscious guidance     Show conversation analysis guidance
     samantha-llm subconscious wait         Wait for worker to finish processing
@@ -844,6 +878,10 @@ Description:
     Use 'link' to manually activate samantha-llm in a project directory, and
     'unlink' to deactivate it. This creates/removes a .ai-cerebrum symlink that
     provides access to the samantha-llm repository and memory system.
+
+    The 'projects' commands help manage project state tracking. The subconscious
+    system automatically detects project changes and generates draft updates for
+    user review, keeping the current-tasks index up-to-date.
 
     Supports Linux, macOS, and Windows.
 
@@ -873,6 +911,12 @@ Examples:
 
     # Change default agent
     samantha-llm setup --default claude
+
+    # Check project status
+    samantha-llm projects status
+
+    # Review pending project updates
+    samantha-llm projects review
 
     # Unlink a project directory
     cd /path/to/project
@@ -2197,6 +2241,218 @@ def cmd_memories(args):
         return 1
 
 
+def cmd_projects(args):
+    """Handle project management commands"""
+    subcommand = args.subcommand or 'help'
+
+    if subcommand == 'status':
+        return cmd_projects_status(args)
+
+    elif subcommand == 'review':
+        return cmd_projects_review(args)
+
+    elif subcommand == 'help' or subcommand not in ['status', 'review']:
+        print_info("Project management commands:")
+        print()
+        print_info("  samantha-llm projects status  - Show overview of active/completed projects")
+        print_info("  samantha-llm projects review  - Review and apply pending project updates")
+        print()
+        print_info("Examples:")
+        print_info("  samantha-llm projects status")
+        print_info("  samantha-llm projects review")
+        print_info("  samantha-llm projects review --auto-apply")
+        return 0
+
+    else:
+        print_error(f"Unknown projects subcommand: {subcommand}")
+        return 1
+
+
+def cmd_projects_status(args):
+    """Show project status overview"""
+    config = read_config()
+    if not config:
+        print_error("Configuration not found. Run 'samantha-llm setup' first.")
+        return 1
+
+    repo_path = Path(config.get('repo_path', ''))
+    if not repo_path.exists():
+        print_error(f"Cerebrum repository not found: {repo_path}")
+        return 1
+
+    current_tasks_path = repo_path / '.ai' / 'current-tasks' / '.ai'
+    index_file = current_tasks_path / 'index.json'
+
+    if not index_file.exists():
+        print_error("Current tasks index not found")
+        return 1
+
+    with open(index_file) as f:
+        tasks = json.load(f)
+
+    active = tasks.get('active', [])
+    completed = tasks.get('recently_completed', [])
+
+    pending_updates_path = current_tasks_path / 'pending-updates'
+    pending_count = 0
+    if pending_updates_path.exists():
+        pending_count = len(list(pending_updates_path.glob('*.json')))
+
+    print()
+    print_success(f"📊 Project Status Overview")
+    print()
+
+    print_info(f"Active Projects: {len(active)}")
+    for project in active:
+        print(f"  • {project['name']}: {project['status']}")
+
+    if completed:
+        print()
+        print_info(f"Recently Completed: {len(completed)}")
+        for project in completed[:3]:
+            print(f"  • {project['name']}: {project['status']}")
+
+    print()
+    if pending_count > 0:
+        print_warning(f"⚠️  {pending_count} pending project update(s) awaiting review")
+        print_info("Run 'samantha-llm projects review' to review and apply updates")
+    else:
+        print_success("✓ No pending project updates")
+
+    print()
+    return 0
+
+
+def cmd_projects_review(args):
+    """Review and apply pending project updates"""
+    config = read_config()
+    if not config:
+        print_error("Configuration not found. Run 'samantha-llm setup' first.")
+        return 1
+
+    repo_path = Path(config.get('repo_path', ''))
+    if not repo_path.exists():
+        print_error(f"Cerebrum repository not found: {repo_path}")
+        return 1
+
+    current_tasks_path = repo_path / '.ai' / 'current-tasks' / '.ai'
+    pending_updates_path = current_tasks_path / 'pending-updates'
+
+    if not pending_updates_path.exists():
+        print_info("No pending updates directory found")
+        return 0
+
+    pending_files = sorted(pending_updates_path.glob('*.json'))
+
+    if not pending_files:
+        print_success("✓ No pending project updates to review")
+        return 0
+
+    print()
+    print_info(f"Found {len(pending_files)} pending project update(s)")
+    print()
+
+    index_file = current_tasks_path / 'index.json'
+    if not index_file.exists():
+        print_error("Current tasks index not found")
+        return 1
+
+    with open(index_file) as f:
+        tasks = json.load(f)
+
+    applied_count = 0
+    skipped_count = 0
+
+    for update_file in pending_files:
+        with open(update_file) as f:
+            update = json.load(f)
+
+        print_info(f"Project: {update['project_name']}")
+        print_info(f"Session: {update['session_date']} ({update['session_id']})")
+        print_info(f"Confidence: {update['confidence']}")
+        print()
+
+        print("Proposed Changes:")
+        for key, value in update['proposed_changes'].items():
+            if value:
+                print(f"  {key}: {value[:100]}{'...' if len(value) > 100 else ''}")
+        print()
+
+        print("Evidence:")
+        for evidence in update['evidence'][:5]:
+            print(f"  • {evidence}")
+        if len(update['evidence']) > 5:
+            print(f"  ... and {len(update['evidence']) - 5} more")
+        print()
+
+        print("Reasoning:")
+        print(f"  {update['reasoning']}")
+        print()
+
+        response = input("Apply this update? [y/n/s=skip all]: ").strip().lower()
+
+        if response == 's':
+            print_info("Skipping remaining updates")
+            break
+
+        if response == 'y':
+            if apply_project_update(tasks, update):
+                with open(index_file, 'w') as f:
+                    json.dump(tasks, f, indent=2)
+
+                update_file.unlink()
+                print_success(f"✓ Applied update for {update['project_name']}")
+                applied_count += 1
+            else:
+                print_error(f"Failed to apply update for {update['project_name']}")
+        else:
+            print_info("Skipped")
+            skipped_count += 1
+
+        print()
+
+    print()
+    print_success(f"Review complete: {applied_count} applied, {skipped_count} skipped")
+    return 0
+
+
+def apply_project_update(tasks: dict, update: dict) -> bool:
+    """
+    Apply a project update to the tasks index.
+
+    Args:
+        tasks: Current tasks dictionary
+        update: Update dictionary with proposed changes
+
+    Returns:
+        True if successful, False otherwise
+    """
+    project_name = update['project_name']
+
+    project = None
+    for p in tasks.get('active', []):
+        if p['name'] == project_name:
+            project = p
+            break
+
+    if not project:
+        for p in tasks.get('recently_completed', []):
+            if p['name'] == project_name:
+                project = p
+                break
+
+    if not project:
+        return False
+
+    for key, value in update['proposed_changes'].items():
+        if value:
+            project[key] = value
+
+    tasks['last_updated'] = datetime.now().strftime("%Y-%m-%d")
+
+    return True
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -2205,7 +2461,7 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'projects', 'help', 'version'],
                         help='Command to execute')
     parser.add_argument('subcommand', nargs='?', default=None,
                         help='Subcommand (for qmd command)')
@@ -2228,6 +2484,7 @@ def main():
         'qmd': cmd_qmd,
         'memories': cmd_memories,
         'subconscious': cmd_subconscious,
+        'projects': cmd_projects,
         'help': cmd_help,
         'version': cmd_version,
     }
