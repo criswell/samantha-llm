@@ -16,6 +16,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
+# Import session workspace management
+try:
+    from session_workspace import SessionWorkspace
+    HAS_WORKSPACE = True
+except ImportError:
+    HAS_WORKSPACE = False
+
 # Import terminal parser if available
 try:
     import importlib.util
@@ -153,7 +160,8 @@ def _analyze_with_chunking(
     prompt_path: Path,
     analyses_dir: Path,
     parsed_dir: Path,
-    log_file: Path
+    log_func,
+    workspace: Optional['SessionWorkspace'] = None
 ):
     """
     Analyze long conversation using chunking with context passing.
@@ -164,7 +172,8 @@ def _analyze_with_chunking(
         prompt_path: Path to analysis prompt
         analyses_dir: Directory for raw LLM output
         parsed_dir: Directory for parsed text
-        log_file: Log file path
+        log_func: Logging function to call
+        workspace: Optional SessionWorkspace for manifest tracking
 
     Returns:
         Combined AnalysisResult from all chunks
@@ -173,7 +182,11 @@ def _analyze_with_chunking(
     chunker = conversation_chunker.create_chunker(target_size=150000)
     chunks = chunker.chunk(conversation_text, strategy='natural')
 
-    log(log_file, f"[LLM] Split conversation into {len(chunks)} chunks")
+    log_func(f"[LLM] Split conversation into {len(chunks)} chunks")
+
+    # Initialize chunk manifest if workspace provided
+    if workspace:
+        workspace.init_chunk_manifest(len(chunks))
 
     # Create analyzer with output_dir to save raw LLM output for each chunk
     analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
@@ -184,7 +197,13 @@ def _analyze_with_chunking(
 
     for chunk in chunks:
         chunk_num = chunk.chunk_index + 1
-        log(log_file, f"[LLM] Analyzing chunk {chunk_num}/{chunk.total_chunks} ({len(chunk):,} chars, boundary: {chunk.boundary_reason})")
+        log_func(f"[LLM] Analyzing chunk {chunk_num}/{chunk.total_chunks} ({len(chunk):,} chars, boundary: {chunk.boundary_reason})")
+
+        # Update chunk status to processing
+        if workspace:
+            workspace.update_chunk_status(chunk_num, 'processing', {
+                'started_at': datetime.now().isoformat()
+            })
 
         # Prepend context from previous chunks (if any)
         if accumulated_context:
@@ -200,31 +219,48 @@ def _analyze_with_chunking(
         try:
             result = analyzer.analyze(chunk_file)
 
-            log(log_file, f"[LLM] Chunk {chunk_num} complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions")
-            log(log_file, f"[LLM] Raw output saved: analysis_{session_id}_chunk{chunk_num}.md")
+            log_func(f"[LLM] Chunk {chunk_num} complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions")
+            log_func(f"[LLM] Raw output saved: analysis_{session_id}_chunk{chunk_num}.md")
 
             chunk_results.append(result)
+
+            # Mark chunk as complete
+            if workspace:
+                workspace.update_chunk_status(chunk_num, 'complete', {
+                    'completed_at': datetime.now().isoformat(),
+                    'patterns_count': len(result.patterns),
+                    'decisions_count': len(result.decisions)
+                })
 
             # Update accumulated context for next chunk
             if chunk_num < chunk.total_chunks:
                 accumulated_context = result.to_context_summary()
 
         except Exception as e:
-            log(log_file, f"[ERROR] Chunk {chunk_num} analysis failed: {e}")
+            log_func(f"[ERROR] Chunk {chunk_num} analysis failed: {e}")
+
+            # Mark chunk as failed
+            if workspace:
+                workspace.update_chunk_status(chunk_num, 'failed', {
+                    'failed_at': datetime.now().isoformat(),
+                    'error': str(e),
+                    'attempts': workspace.get_chunk_manifest()['chunks'][str(chunk_num)].get('attempts', 0) + 1
+                })
+
             # Continue with remaining chunks
             continue
 
     # Merge all chunk results
-    log(log_file, f"[LLM] Merging {len(chunk_results)} chunk results...")
-    merged_result = _merge_chunk_results(chunk_results, session_id, log_file)
+    log_func(f"[LLM] Merging {len(chunk_results)} chunk results...")
+    merged_result = _merge_chunk_results(chunk_results, session_id, log_func)
 
     # Save combined parsed analysis (Part 2 only - for guidance)
     combined_parsed_file = analyses_dir / f'analysis_{session_id}_parsed.md'
     combined_parsed_file.write_text(merged_result.to_markdown())
-    log(log_file, f"[LLM] Combined parsed analysis saved to: {combined_parsed_file}")
+    log_func(f"[LLM] Combined parsed analysis saved to: {combined_parsed_file}")
 
     # Combine all raw chunk outputs (includes Part 1 + Part 2 for each chunk)
-    log(log_file, f"[LLM] Combining raw chunk outputs...")
+    log_func(f"[LLM] Combining raw chunk outputs...")
     combined_sections = []
     for i in range(len(chunk_results)):
         chunk_num = i + 1
@@ -236,19 +272,19 @@ def _analyze_with_chunking(
     # Save combined raw output (full detailed analysis)
     combined_raw_file = analyses_dir / f'analysis_{session_id}_full.md'
     combined_raw_file.write_text("\n\n---\n\n".join(combined_sections))
-    log(log_file, f"[LLM] Combined raw analysis saved to: {combined_raw_file}")
+    log_func(f"[LLM] Combined raw analysis saved to: {combined_raw_file}")
 
     return merged_result
 
 
-def _merge_chunk_results(chunk_results, session_id: str, log_file: Path):
+def _merge_chunk_results(chunk_results, session_id: str, log_func):
     """
     Merge multiple AnalysisResult objects into one.
 
     Args:
         chunk_results: List of AnalysisResult objects
         session_id: Session identifier
-        log_file: Log file path
+        log_func: Logging function to call
 
     Returns:
         Combined AnalysisResult
@@ -308,67 +344,71 @@ def _merge_chunk_results(chunk_results, session_id: str, log_file: Path):
         summary="\n\n".join(summaries) if summaries else None
     )
 
-    log(log_file, f"[LLM] Merged results: {len(merged.patterns)} patterns, {len(merged.decisions)} decisions, {len(merged.todos)} TODOs")
+    log_func(f"[LLM] Merged results: {len(merged.patterns)} patterns, {len(merged.decisions)} decisions, {len(merged.todos)} TODOs")
 
     return merged
 
 
-def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: Path) -> Optional[dict]:
+def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, workspace: Optional['SessionWorkspace'] = None) -> Optional[dict]:
     """
     Process transcript using LLM analysis.
 
     Args:
         terminal_data: Parsed terminal recording data
         cerebrum_path: Path to cerebrum root
-        log_file: Path to log file
+        log_func: Logging function to call
+        workspace: Optional SessionWorkspace for session-isolated processing
 
     Returns:
         Analysis result dict if successful, None otherwise
     """
     if not HAS_ANALYZER:
-        log(log_file, "[WARN] LLM analyzer not available, using basic processing")
+        log_func("[WARN] LLM analyzer not available, using basic processing")
         return None
 
     try:
         # Find the prompt file
         prompt_path = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'prompts' / 'analysis-prompt-v2.txt'
         if not prompt_path.exists():
-            log(log_file, f"[WARN] Analysis prompt not found: {prompt_path}")
+            log_func(f"[WARN] Analysis prompt not found: {prompt_path}")
             return None
 
-        # Save terminal text to temp file for analysis
-        recordings_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'recordings'
-        parsed_dir = recordings_dir.parent / 'parsed'
-        parsed_dir.mkdir(exist_ok=True)
-
-        # Create analyses directory for raw LLM output
-        analyses_dir = recordings_dir.parent / 'analyses'
-        analyses_dir.mkdir(exist_ok=True)
+        # Use workspace directories if available, otherwise fall back to old paths
+        if workspace:
+            parsed_dir = workspace.parsed_dir
+            analyses_dir = workspace.analyses_dir
+        else:
+            recordings_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'recordings'
+            parsed_dir = recordings_dir.parent / 'parsed'
+            parsed_dir.mkdir(exist_ok=True)
+            analyses_dir = recordings_dir.parent / 'analyses'
+            analyses_dir.mkdir(exist_ok=True)
 
         # Get conversation text
         session_id = terminal_data.get('metadata', {}).get('session_id', 'unknown')
         conversation_text = terminal_data['raw_text']
         text_size = len(conversation_text)
 
-        log(log_file, f"[LLM] Conversation size: {text_size:,} characters")
+        log_func(f"[LLM] Conversation size: {text_size:,} characters")
 
         # Check if chunking is needed
         CHUNK_THRESHOLD = 150000  # ~200K tokens with prompt
         needs_chunking = text_size > CHUNK_THRESHOLD and HAS_CHUNKER
 
         if needs_chunking:
-            log(log_file, f"[LLM] Conversation exceeds {CHUNK_THRESHOLD:,} chars, using chunked analysis")
+            log_func(f"[LLM] Conversation exceeds {CHUNK_THRESHOLD:,} chars, using chunked analysis")
             result = _analyze_with_chunking(
                 conversation_text,
                 session_id,
                 prompt_path,
                 analyses_dir,
                 parsed_dir,
-                log_file
+                log_func,
+                workspace
             )
         else:
             # Single-pass analysis (original behavior)
-            log(log_file, f"[LLM] Starting conversation analysis...")
+            log_func(f"[LLM] Starting conversation analysis...")
 
             # Write to parsed directory
             parsed_file = parsed_dir / f'parsed_{session_id}.txt'
@@ -378,8 +418,8 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: P
             analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
             result = analyzer.analyze(parsed_file)
 
-            log(log_file, f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
-            log(log_file, f"[LLM] Raw output saved to: {analyses_dir / f'analysis_{session_id}.md'}")
+            log_func(f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
+            log_func(f"[LLM] Raw output saved to: {analyses_dir / f'analysis_{session_id}.md'}")
 
         # Convert to dict for easier handling
         analysis_dict = {
@@ -395,13 +435,151 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_file: P
         return analysis_dict
 
     except Exception as e:
-        log(log_file, f"[ERROR] LLM analysis failed: {e}")
+        log_func(f"[ERROR] LLM analysis failed: {e}")
         import traceback
-        log(log_file, f"[ERROR] {traceback.format_exc()}")
+        log_func(f"[ERROR] {traceback.format_exc()}")
         return None
 
 
-def generate_guidance_basic(cerebrum_path: Path, analysis: dict, llm_analysis: Optional[dict] = None):
+def finalize_session_memories(session_workspace: 'SessionWorkspace', cerebrum_path: Path, log_func) -> list:
+    """
+    Finalize session by moving memories to cerebrum and updating index.
+
+    Args:
+        session_workspace: SessionWorkspace instance
+        cerebrum_path: Path to cerebrum root
+        log_func: Logging function
+
+    Returns:
+        List of finalized memory file paths
+    """
+    import json
+    import shutil
+
+    # Find all memory files in session workspace
+    memories_dir = session_workspace.memories_dir
+    if not memories_dir.exists():
+        log_func("[FINALIZE] No memories directory in session workspace")
+        return []
+
+    memory_files = list(memories_dir.glob('*.md'))
+    if not memory_files:
+        log_func("[FINALIZE] No memory files to finalize")
+        return []
+
+    log_func(f"[FINALIZE] Found {len(memory_files)} memory files to finalize")
+
+    # Target directories
+    cerebrum_memories_dir = cerebrum_path / '.ai' / 'short-term-memory' / '.ai'
+    cerebrum_memories_dir.mkdir(parents=True, exist_ok=True)
+
+    index_file = cerebrum_memories_dir / 'index.json'
+
+    # Load current index
+    if index_file.exists():
+        with open(index_file) as f:
+            index = json.load(f)
+    else:
+        # Create new index structure
+        index = {
+            'last_updated': '',
+            'total_memories': 0,
+            'critical': [],
+            'high_priority': [],
+            'recent': {
+                'high_importance': [],
+                'medium_importance': []
+            },
+            'stats': {
+                'by_importance': {'high': 0, 'medium': 0, 'low': 0},
+                'by_type': {},
+                'by_project': {}
+            }
+        }
+
+    finalized = []
+
+    for memory_file in memory_files:
+        # Parse frontmatter to get metadata
+        content = memory_file.read_text()
+
+        # Extract YAML frontmatter
+        if content.startswith('---\n'):
+            parts = content.split('---\n', 2)
+            if len(parts) >= 3:
+                # Simple YAML parsing (avoid external dependency)
+                frontmatter = {}
+                for line in parts[1].split('\n'):
+                    line = line.strip()
+                    if ': ' in line:
+                        key, value = line.split(': ', 1)
+                        # Handle lists
+                        if value.startswith('[') and value.endswith(']'):
+                            value = [v.strip() for v in value.strip('[]').split(',')]
+                        # Handle numbers
+                        elif value.isdigit():
+                            value = int(value)
+                        frontmatter[key] = value
+            else:
+                frontmatter = {}
+        else:
+            frontmatter = {}
+
+        # Copy memory to cerebrum
+        dest_file = cerebrum_memories_dir / memory_file.name
+        shutil.copy2(memory_file, dest_file)
+        log_func(f"[FINALIZE] Copied {memory_file.name} to cerebrum")
+        finalized.append(dest_file)
+
+        # Update index
+        date = frontmatter.get('date', '')
+        topics = frontmatter.get('topics', [])
+        if isinstance(topics, str):
+            topics = [t.strip() for t in topics.strip('[]').split(',')]
+
+        importance = frontmatter.get('importance', 'medium')
+        mem_type = frontmatter.get('type', 'session-analysis')
+        project = frontmatter.get('project', '')
+
+        # Create index entry
+        entry = {
+            'date': date,
+            'title': memory_file.stem.replace('_', ' ').title(),
+            'topics': topics,
+            'type': mem_type,
+            'project': project,
+            'summary': f"Auto-generated from session {session_workspace.session_id}",
+            'file': memory_file.name,
+            'references': 0
+        }
+
+        # Add to appropriate section
+        if importance == 'high':
+            index['recent']['high_importance'].insert(0, entry)
+        else:
+            index['recent']['medium_importance'].insert(0, entry)
+
+        # Update stats
+        index['stats']['by_importance'][importance] = index['stats']['by_importance'].get(importance, 0) + 1
+        index['stats']['by_type'][mem_type] = index['stats']['by_type'].get(mem_type, 0) + 1
+        if project:
+            index['stats']['by_project'][project] = index['stats']['by_project'].get(project, 0) + 1
+
+    # Update index metadata
+    from datetime import datetime
+    index['last_updated'] = datetime.now().strftime('%Y-%m-%d')
+    index['total_memories'] = index.get('total_memories', 0) + len(finalized)
+
+    # Write updated index
+    with open(index_file, 'w') as f:
+        json.dump(index, f, indent=2)
+
+    log_func(f"[FINALIZE] Updated index.json with {len(finalized)} new memories")
+
+    return finalized
+
+
+def generate_guidance_basic(cerebrum_path: Path, analysis: dict, llm_analysis: Optional[dict] = None, workspace: Optional['SessionWorkspace'] = None):
     """
     Generate lightweight guidance file - just a session log for quick orientation.
 
@@ -409,11 +587,15 @@ def generate_guidance_basic(cerebrum_path: Path, analysis: dict, llm_analysis: O
         cerebrum_path: Path to cerebrum root
         analysis: Basic session analysis
         llm_analysis: Optional LLM analysis results
+        workspace: Optional SessionWorkspace (writes to session-specific location if provided)
     """
-    guidance_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai'
-    guidance_dir.mkdir(parents=True, exist_ok=True)
-
-    guidance_file = guidance_dir / 'guidance.md'
+    # Write to session workspace if available, otherwise use global guidance
+    if workspace:
+        guidance_file = workspace.guidance_file
+    else:
+        guidance_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai'
+        guidance_dir.mkdir(parents=True, exist_ok=True)
+        guidance_file = guidance_dir / 'guidance.md'
 
     # Extract date from session_id or use current date
     session_id = analysis.get('session_id', 'unknown')
@@ -502,26 +684,42 @@ def main():
     transcript_file = Path(sys.argv[1])
     cerebrum_path = Path(sys.argv[2])
 
-    # Set up logging
-    log_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai'
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / 'processing.log'
+    # Extract session ID from transcript filename
+    import re
+    match = re.search(r'transcript_(\d{8}_\d{6})', transcript_file.name)
+    session_id = match.group(1) if match else 'unknown'
 
-    # Create lock file
-    lockfile = log_dir / '.processing.lock'
+    # Create session workspace if available
+    workspace = None
+    if HAS_WORKSPACE and session_id != 'unknown':
+        workspace = SessionWorkspace(session_id, cerebrum_path)
+        workspace.create()
+        log_func = workspace.log
+        log_file = workspace.log_file
+    else:
+        # Fall back to old global logging
+        log_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / 'processing.log'
+        log_func = lambda msg: log(log_file, msg)
+
+    # Create lock file (global for now, per-session later)
+    lockfile = (workspace.root if workspace else log_dir) / '.processing.lock'
 
     try:
         # Acquire lock
         lockfile.touch()
-        log(log_file, f"[START] Processing {transcript_file.name}")
+        log_func(f"[START] Processing {transcript_file.name}")
 
         # Load transcript
         if not transcript_file.exists():
-            log(log_file, f"[ERROR] Transcript file not found: {transcript_file}")
+            log_func(f"[ERROR] Transcript file not found: {transcript_file}")
+            if workspace:
+                workspace.mark_failed(f"Transcript file not found: {transcript_file}")
             sys.exit(1)
 
         events = load_transcript(transcript_file)
-        log(log_file, f"[LOAD] Loaded {len(events)} events")
+        log_func(f"[LOAD] Loaded {len(events)} events")
 
         # Find and parse terminal recording if available
         terminal_data = None
@@ -530,24 +728,24 @@ def main():
             if recording_file:
                 try:
                     terminal_data = terminal_parser.parse_terminal_recording(recording_file)
-                    log(log_file, f"[PARSE] Parsed terminal recording: {len(terminal_data['raw_text'])} chars, {len(terminal_data['messages'])} messages")
+                    log_func(f"[PARSE] Parsed terminal recording: {len(terminal_data['raw_text'])} chars, {len(terminal_data['messages'])} messages")
                 except Exception as e:
-                    log(log_file, f"[WARN] Failed to parse terminal recording: {e}")
+                    log_func(f"[WARN] Failed to parse terminal recording: {e}")
 
         # Process transcript (basic statistics)
         analysis = process_transcript_basic(events, terminal_data)
-        log(log_file, f"[ANALYZE] Session: {analysis['session_id']}, Duration: {analysis['duration']:.1f}s")
+        log_func(f"[ANALYZE] Session: {analysis['session_id']}, Duration: {analysis['duration']:.1f}s")
         if terminal_data:
-            log(log_file, f"[ANALYZE] Terminal recording: {analysis['terminal_text_length']} chars")
+            log_func(f"[ANALYZE] Terminal recording: {analysis['terminal_text_length']} chars")
 
         # Phase 3: LLM processing for pattern detection
         llm_analysis = None
         if terminal_data and HAS_ANALYZER:
-            llm_analysis = process_transcript_llm(terminal_data, cerebrum_path, log_file)
+            llm_analysis = process_transcript_llm(terminal_data, cerebrum_path, log_func, workspace)
             if llm_analysis:
-                log(log_file, f"[LLM] Found {len(llm_analysis.get('patterns', []))} patterns, {len(llm_analysis.get('decisions', []))} decisions")
+                log_func(f"[LLM] Found {len(llm_analysis.get('patterns', []))} patterns, {len(llm_analysis.get('decisions', []))} decisions")
             else:
-                log(log_file, "[LLM] Analysis not available, falling back to basic processing")
+                log_func("[LLM] Analysis not available, falling back to basic processing")
 
         # Phase 4: Memory creation (if LLM analysis available)
         memory_file = None
@@ -566,36 +764,53 @@ def main():
                     summary=llm_analysis.get('summary')
                 )
 
+                # Generate memory file (uses workspace if available)
                 memory_file = generate_memory_file(
                     analysis=analysis_result,
                     session_id=analysis['session_id'],
                     workspace=Path(analysis.get('workspace', 'unknown')),
                     duration_seconds=int(analysis['duration']),
-                    cerebrum_path=cerebrum_path
+                    cerebrum_path=cerebrum_path,
+                    session_workspace=workspace
                 )
-                log(log_file, f"[MEMORY] Created memory file: {memory_file}")
+                log_func(f"[MEMORY] Created memory file: {memory_file}")
             except Exception as e:
-                log(log_file, f"[MEMORY] Failed to create memory file: {e}")
+                log_func(f"[MEMORY] Failed to create memory file: {e}")
                 import traceback
-                log(log_file, f"[MEMORY] {traceback.format_exc()}")
+                log_func(f"[MEMORY] {traceback.format_exc()}")
 
         # Generate guidance (with LLM insights if available)
-        guidance_file = generate_guidance_basic(cerebrum_path, analysis, llm_analysis)
-        log(log_file, f"[GUIDANCE] Generated guidance: {guidance_file}")
+        guidance_file = generate_guidance_basic(cerebrum_path, analysis, llm_analysis, workspace)
+        log_func(f"[GUIDANCE] Generated guidance: {guidance_file}")
+
+        # Finalize session memories (move to cerebrum, update index)
+        if workspace and memory_file:
+            finalized_memories = finalize_session_memories(workspace, cerebrum_path, log_func)
+            if finalized_memories:
+                log_func(f"[FINALIZE] Finalized {len(finalized_memories)} memories to cerebrum")
 
         # Move processed transcript to processed directory
         processed_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'processed'
         processed_dir.mkdir(parents=True, exist_ok=True)
         processed_file = processed_dir / transcript_file.name
         transcript_file.rename(processed_file)
-        log(log_file, f"[ARCHIVE] Moved transcript to: {processed_file}")
+        log_func(f"[ARCHIVE] Moved transcript to: {processed_file}")
 
-        log(log_file, f"[COMPLETE] Processing complete")
+        # Mark session as complete
+        if workspace:
+            workspace.mark_complete({
+                'patterns_count': len(llm_analysis.get('patterns', [])) if llm_analysis else 0,
+                'decisions_count': len(llm_analysis.get('decisions', [])) if llm_analysis else 0
+            })
+
+        log_func(f"[COMPLETE] Processing complete")
 
     except Exception as e:
-        log(log_file, f"[ERROR] {str(e)}")
+        log_func(f"[ERROR] {str(e)}")
         import traceback
-        log(log_file, f"[ERROR] {traceback.format_exc()}")
+        log_func(f"[ERROR] {traceback.format_exc()}")
+        if workspace:
+            workspace.mark_failed(str(e))
         # Don't raise - just log and exit gracefully
 
     finally:

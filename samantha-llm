@@ -705,7 +705,7 @@ def cmd_status(args):
 
 
 def cmd_subconscious(args):
-    """Subconscious command - view subconscious status and guidance"""
+    """Subconscious command - manage session processing and view status"""
     config = read_config()
     if not config or 'repo_path' not in config:
         print_error("samantha-llm is not installed")
@@ -723,7 +723,24 @@ def cmd_subconscious(args):
         subcommand = 'status'
 
     if subcommand == 'status':
-        # Show subconscious status
+        # Enhanced status display using new bootstrap_status module
+        try:
+            import sys
+            sys.path.insert(0, str(repo_path))
+            from bootstrap_status import display_processing_status
+
+            has_active = display_processing_status(repo_path)
+
+            if not has_active:
+                print("\n✓ No active subconscious processing")
+
+            return 0
+        except ImportError:
+            print_warning("Enhanced status display not available, using legacy view")
+            # Fall back to legacy status display
+            pass
+
+        # Legacy status display (fallback)
         print("Subconscious Status:")
         print("=" * 50)
         print()
@@ -743,17 +760,113 @@ def cmd_subconscious(args):
         else:
             print_info("No guidance file yet")
 
-        # Check processing log
-        log_file = subconscious_dir / 'processing.log'
-        if log_file.exists():
-            # Show last few log entries
-            with open(log_file) as f:
-                lines = f.readlines()
-                if lines:
-                    print()
-                    print_info("Recent processing activity:")
-                    for line in lines[-5:]:
-                        print(f"  {line.rstrip()}")
+        print()
+        return 0
+
+    elif subcommand == 'retry':
+        # Retry failed chunks in a session
+        session_id = args.agent  # Reusing agent field for session_id
+
+        if not session_id:
+            print_error("Session ID required")
+            print_info("Usage: samantha-llm subconscious retry <session_id>")
+            print_info("\nTip: Use 'samantha-llm subconscious status' to see active sessions")
+            return 1
+
+        try:
+            import sys
+            sys.path.insert(0, str(repo_path))
+            from chunk_retry import retry_session
+
+            print()
+            retry_session(session_id, repo_path)
+            return 0
+
+        except ImportError as e:
+            print_error(f"Chunk retry module not available: {e}")
+            print_info("This feature requires the latest subconscious implementation")
+            return 1
+        except Exception as e:
+            print_error(f"Retry failed: {e}")
+            return 1
+
+    elif subcommand == 'merge':
+        # Merge completed sessions
+        try:
+            import sys
+            sys.path.insert(0, str(repo_path))
+            from merge_sessions import merge_completed_sessions
+
+            print()
+            merge_completed_sessions(repo_path, dry_run=False)
+            return 0
+
+        except ImportError as e:
+            print_error(f"Merge module not available: {e}")
+            print_info("This feature requires the latest subconscious implementation")
+            return 1
+        except Exception as e:
+            print_error(f"Merge failed: {e}")
+            return 1
+
+    elif subcommand == 'list':
+        # List all sessions (active and archived)
+        try:
+            import sys
+            sys.path.insert(0, str(repo_path))
+            from session_workspace import get_session_workspaces
+
+            workspaces = get_session_workspaces(repo_path)
+
+            if not workspaces:
+                print_info("No active sessions found")
+                return 0
+
+            print(f"\nActive Session Workspaces ({len(workspaces)}):")
+            print("=" * 60)
+
+            for ws in sorted(workspaces, key=lambda w: w.session_id, reverse=True):
+                status = ws.get_status()
+                status_symbol = {
+                    'processing': '⏳',
+                    'complete': '✅',
+                    'failed': '❌'
+                }.get(status.get('status'), '?')
+
+                print(f"\n{status_symbol} Session: {ws.session_id}")
+                print(f"   Status: {status.get('status', 'unknown')}")
+                if 'created_at' in status:
+                    print(f"   Created: {status['created_at']}")
+                if status.get('status') == 'complete' and 'completed_at' in status:
+                    print(f"   Completed: {status['completed_at']}")
+
+            print()
+            return 0
+
+        except ImportError:
+            print_error("Session workspace module not available")
+            return 1
+
+    elif subcommand == 'status-old':
+        # Legacy status display (kept for compatibility)
+        print("Subconscious Status (Legacy):")
+        print("=" * 50)
+        print()
+
+        # Check if worker is running
+        is_running, estimated_remaining = check_worker_running(repo_path)
+        if is_running:
+            print_warning(f"Worker running (~{estimated_remaining}s remaining)")
+        else:
+            print_success("No worker running")
+
+        # Check for guidance file
+        guidance_file = subconscious_dir / 'guidance.md'
+        if guidance_file.exists():
+            print_info(f"Guidance file: {guidance_file}")
+            print_info(f"  Last updated: {datetime.fromtimestamp(guidance_file.stat().st_mtime)}")
+        else:
+            print_info("No guidance file yet")
 
         print()
         return 0
@@ -801,7 +914,15 @@ def cmd_subconscious(args):
 
     else:
         print_error(f"Unknown subcommand: {subcommand}")
-        print_info("Available subcommands: status, guidance, wait, reset-prompt")
+        print()
+        print_info("Available subcommands:")
+        print_info("  status         - Show active session processing status")
+        print_info("  retry <id>     - Retry failed chunks in a session")
+        print_info("  merge          - Merge completed sessions into cerebrum")
+        print_info("  list           - List all active session workspaces")
+        print_info("  guidance       - Show conversation analysis guidance")
+        print_info("  wait           - Wait for worker to finish processing")
+        print_info("  reset-prompt   - Reset analysis prompt to default")
         return 1
 
 
@@ -823,10 +944,13 @@ Usage:
     samantha-llm qmd check         Quick check if qmd is available
     samantha-llm memories index    Index cerebrum files for semantic search
     samantha-llm memories search   Search memories with semantic/keyword search
-    samantha-llm subconscious status       Show subconscious worker status
-    samantha-llm subconscious guidance     Show conversation analysis guidance
-    samantha-llm subconscious wait         Wait for worker to finish processing
-    samantha-llm subconscious reset-prompt Reset analysis prompt to default
+    samantha-llm subconscious status         Show active session processing status
+    samantha-llm subconscious retry <id>     Retry failed chunks in a session
+    samantha-llm subconscious merge          Merge completed sessions into cerebrum
+    samantha-llm subconscious list           List all active session workspaces
+    samantha-llm subconscious guidance       Show conversation analysis guidance
+    samantha-llm subconscious wait           Wait for worker to finish processing
+    samantha-llm subconscious reset-prompt   Reset analysis prompt to default
     samantha-llm status            Show installation status and configuration
     samantha-llm version           Show version information
     samantha-llm help              Show this help message
@@ -880,6 +1004,15 @@ Examples:
 
     # Uninstall samantha-llm
     samantha-llm uninstall
+
+    # Check subconscious processing status
+    samantha-llm subconscious status
+
+    # Retry failed chunks after laptop sleep
+    samantha-llm subconscious retry 20260205_120000
+
+    # Merge completed sessions
+    samantha-llm subconscious merge
 
 Platform-Specific Notes:
     Linux/macOS: Installs to ~/.local/bin using symlink

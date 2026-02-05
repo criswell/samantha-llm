@@ -24,6 +24,29 @@ Samantha Hartwell is an AI assistant designed to function as a senior software e
 - **Active Work**: Current projects and their status
 - **Experience**: Completed projects and accumulated knowledge
 
+## Key Features
+
+### Subconscious Memory System
+
+Samantha includes an automated memory creation system that runs after each session:
+
+- **Automatic Analysis**: After each session ends, a background worker analyzes the conversation
+- **Intelligent Extraction**: Uses LLM analysis to extract patterns, decisions, learnings, and preferences
+- **Memory Generation**: Creates properly-formatted memory files with YAML frontmatter
+- **Index Updates**: Automatically updates the memory index so new memories appear in next session's bootstrap
+- **Session Isolation**: Each session processes independently, supporting concurrent sessions
+- **Retry Resilience**: Handles laptop sleep and API outages by automatically retrying failed chunks
+
+**No manual intervention needed** - the system works transparently in the background, preserving important context across sessions.
+
+### Semantic Memory Search
+
+Powered by QMD (Query My Docs), Samantha can semantically search her memories:
+
+- **Hybrid Search**: Combines keyword matching, semantic understanding, and AI re-ranking
+- **Fast Results**: Returns top 10 most relevant memories across all directories
+- **Context Preservation**: Find past decisions, learnings, and patterns instantly
+
 ## Installation
 
 We have easy to follow instructions using the `samantha-llm` command line tool.
@@ -72,6 +95,8 @@ After installation:
 - `samantha-llm qmd install` - Install memory search engine
 - `samantha-llm memories index` - Index memories for searching
 - `samantha-llm memories search` - Search memories semantically
+- `samantha-llm subconscious status` - View subconscious processing status
+- `samantha-llm subconscious retry <session_id>` - Retry failed chunks
 - `samantha-llm help` - Show available commands
 
 **See [COMMANDS.md](COMMANDS.md) for complete command reference.**
