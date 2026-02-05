@@ -32,14 +32,17 @@ jobs:
       
       - name: Validate version format
         run: |
-          VERSION=$(python -c "import re; content=open('samantha-llm').read(); match=re.search(r'VERSION\s*=\s*[\"']([^\"']+)[\"']', content); print(match.group(1) if match else 'NOT_FOUND')")
-          echo "Found version: $VERSION"
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "✓ Version format is valid (semver)"
-          else
-            echo "✗ Version format is invalid: $VERSION"
-            exit 1
-          fi
+          python << 'EOF'
+          import re, sys
+          content = open('samantha-llm').read()
+          match = re.search(r'VERSION\s*=\s*["\']([0-9.]+)["\']', content)
+          version = match.group(1) if match else 'NOT_FOUND'
+          print(f'Found version: {version}')
+          if not re.match(r'^[0-9]+\.[0-9]+\.[0-9]+$', version):
+              print(f'Version format is invalid: {version}')
+              sys.exit(1)
+          print('Version format is valid (semver)')
+          EOF
 
   installation-tests:
     name: Installation Tests - ${{ matrix.os }}
