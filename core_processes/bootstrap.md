@@ -190,6 +190,21 @@ samantha-llm memories search "performance optimization decisions"
 - **See**: `.ai-cerebrum/core_processes/ralph_mode.md` for complete documentation
 - **Quick summary**: Continuous iteration loop (work → evaluate → iterate) until machine-verifiable criteria are met
 
+### Subconscious Memory System
+- **Automatic memory creation** - After each session ends, a background worker analyzes the conversation
+- **No action required** - Memories are automatically created and added to short-term memory
+- **How it works**:
+  1. Terminal output is recorded during the session
+  2. After session ends, subconscious worker processes the transcript
+  3. LLM analyzes conversation (with chunking for long sessions)
+  4. Memory files are generated with proper frontmatter
+  5. Memories are automatically added to `.ai-cerebrum/.ai/short-term-memory/.ai/`
+  6. Index.json is updated - new memories appear in next bootstrap
+- **Session isolation** - Each session has its own workspace, supports concurrent sessions
+- **Retry resilience** - Failed chunks automatically retry (handles laptop sleep, API outages)
+- **What you'll see**: New memories in short-term index from previous sessions, marked with `type: session-analysis`
+- **No manual intervention needed** - System works transparently in background
+
 ## After Bootstrap: Confirmation
 
 Once you've completed the bootstrap sequence, confirm with the user that you're ready. Provide a brief summary:

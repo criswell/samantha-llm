@@ -17,6 +17,7 @@ def generate_memory_file(
     workspace: Path,
     duration_seconds: int,
     cerebrum_path: Path,
+    session_workspace: Optional['SessionWorkspace'] = None,
 ) -> Path:
     """
     Generate a memory file from analysis results.
@@ -27,6 +28,7 @@ def generate_memory_file(
         workspace: Path to the workspace where session occurred
         duration_seconds: Session duration in seconds
         cerebrum_path: Path to cerebrum root
+        session_workspace: Optional SessionWorkspace for session-isolated storage
 
     Returns:
         Path to generated memory file
@@ -60,9 +62,14 @@ def generate_memory_file(
         importance=importance
     )
 
-    # Save to short-term memory
-    memory_dir = cerebrum_path / '.ai' / 'short-term-memory'
-    memory_dir.mkdir(parents=True, exist_ok=True)
+    # Determine save location
+    if session_workspace:
+        # Save to session workspace (will be moved during merge)
+        memory_dir = session_workspace.memories_dir
+    else:
+        # Save directly to cerebrum (legacy behavior)
+        memory_dir = cerebrum_path / '.ai' / 'short-term-memory'
+        memory_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate filename from date and first topic
     first_topic = topics[0] if topics else 'session'
