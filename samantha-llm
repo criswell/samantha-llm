@@ -22,7 +22,7 @@ from datetime import datetime
 FILENAME = os.path.basename(__file__)
 
 # Version
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 
 # Subconscious analysis prompt template
 ANALYSIS_PROMPT_TEMPLATE = """You are analyzing a terminal recording of a conversation between a user and an AI coding assistant (Claude, Copilot, or Abacus.ai). Your goal is to extract meaningful insights that will help the AI assistant better understand the user's work patterns, preferences, and context in future sessions.
@@ -284,6 +284,58 @@ def migrate_old_config():
         return False
 
 
+def migrate_to_v050(config):
+    """
+    Migrate config to v0.5.0 (persona system)
+
+    Returns:
+        Updated config dict
+    """
+    if config.get('version', '0.0.0') >= '0.5.0':
+        return config  # Already migrated
+
+    print_info("Migrating config to v0.5.0 (persona system)...")
+
+    # Add personas section if missing
+    if 'personas' not in config:
+        config['personas'] = {}
+
+    # Register samantha-hartwell as builtin if not already registered
+    if 'samantha-hartwell' not in config['personas']:
+        config['personas']['samantha-hartwell'] = {
+            'type': 'builtin',
+            'file': 'persona/main.md',
+            'description': 'Software engineer with 30+ years experience',
+            'official': True
+        }
+
+    # Set default persona if not set
+    if 'default_persona' not in config:
+        config['default_persona'] = 'samantha-hartwell'
+
+    # Update version
+    config['version'] = '0.5.0'
+
+    print_success("Config migrated to v0.5.0!")
+
+    return config
+
+
+def ensure_config_migrated():
+    """Ensure config is migrated to latest version"""
+    config = read_config()
+
+    if not config:
+        return None
+
+    # Check if migration needed
+    if config.get('version', '0.0.0') < '0.5.0':
+        config = migrate_to_v050(config)
+        write_config(config)
+
+    return config
+
+
 def get_install_path():
     """Get full install path"""
     return get_install_dir() / get_script_name()
@@ -327,11 +379,158 @@ def create_config():
         'version': VERSION,
         'platform': get_platform(),
         'repo_path': str(repo_dir),
+        'default_persona': 'samantha-hartwell',
+        'personas': {
+            'samantha-hartwell': {
+                'type': 'builtin',
+                'file': 'persona/main.md',
+                'description': 'Software engineer with 30+ years experience',
+                'official': True
+            }
+        },
         'agents': {},
         'workspaces': {}
     }
 
     return write_config(config)
+
+
+def get_personas_dir():
+    """Get personas directory path"""
+    return get_config_dir() / 'personas'
+
+
+def get_persona_path(persona_name, config=None):
+    """
+    Resolve persona file path based on type (builtin vs custom)
+
+    Args:
+        persona_name: Name of the persona
+        config: Config dict (will read if not provided)
+
+    Returns:
+        Path to persona file
+    """
+    if config is None:
+        config = read_config()
+
+    if not config or 'personas' not in config:
+        return None
+
+    if persona_name not in config['personas']:
+        return None
+
+    persona = config['personas'][persona_name]
+
+    if persona['type'] == 'builtin':
+        # Read from repo (version controlled)
+        repo_path = Path(config['repo_path'])
+        return repo_path / persona['file']
+    else:  # custom
+        # Read from config directory (user managed)
+        return Path(persona['file']).expanduser()
+
+
+def list_personas(config=None):
+    """
+    List all registered personas
+
+    Returns:
+        List of (name, persona_dict) tuples sorted by type (builtin first)
+    """
+    if config is None:
+        config = read_config()
+
+    if not config or 'personas' not in config:
+        return []
+
+    personas = config['personas'].items()
+
+    # Sort: builtins first, then alphabetically within each group
+    def sort_key(item):
+        name, persona = item
+        is_builtin = persona.get('type') == 'builtin'
+        return (not is_builtin, name)
+
+    return sorted(personas, key=sort_key)
+
+
+def validate_persona_name(name):
+    """
+    Validate persona name (alphanumeric, hyphens, underscores only)
+
+    Returns:
+        (is_valid, error_message)
+    """
+    import re
+    if not name:
+        return False, "Persona name cannot be empty"
+
+    if not re.match(r'^[a-z0-9_-]+$', name):
+        return False, "Persona name must contain only lowercase letters, numbers, hyphens, and underscores"
+
+    if len(name) > 50:
+        return False, "Persona name must be 50 characters or less"
+
+    return True, None
+
+
+def generate_bootstrap_prompt(persona_name, config=None):
+    """
+    Generate bootstrap prompt with selected persona injected
+
+    Args:
+        persona_name: Name of the persona to use
+        config: Config dict (will read if not provided)
+
+    Returns:
+        Full bootstrap prompt as string, or None if error
+    """
+    if config is None:
+        config = read_config()
+
+    if not config:
+        print_error("No config found")
+        return None
+
+    # Read base bootstrap template
+    repo_path = Path(config['repo_path'])
+    bootstrap_template_path = repo_path / 'BOOTSTRAP_PROMPT.md'
+
+    if not bootstrap_template_path.exists():
+        print_error(f"Bootstrap template not found: {bootstrap_template_path}")
+        return None
+
+    try:
+        bootstrap_template = bootstrap_template_path.read_text()
+    except Exception as e:
+        print_error(f"Failed to read bootstrap template: {e}")
+        return None
+
+    # Read selected persona
+    persona_path = get_persona_path(persona_name, config)
+
+    if not persona_path:
+        print_error(f"Persona '{persona_name}' not found")
+        return None
+
+    if not persona_path.exists():
+        print_error(f"Persona file not found: {persona_path}")
+        return None
+
+    try:
+        persona_content = persona_path.read_text()
+    except Exception as e:
+        print_error(f"Failed to read persona file: {e}")
+        return None
+
+    # Inject persona into template
+    full_prompt = bootstrap_template.replace(
+        '{PERSONA_CONTENT_HERE}',
+        persona_content
+    )
+
+    return full_prompt
 
 
 def get_subconscious_prompt_path():
@@ -1057,7 +1256,13 @@ Usage:
     samantha-llm setup             Configure an agent for LLM sessions
     samantha-llm setup --default AGENT  Set default agent
     samantha-llm agents            List configured agents
-    samantha-llm start [AGENT]     Start a Samantha Hartwell session (uses default agent if not specified)
+    samantha-llm start [AGENT]     Start a session (uses default agent/persona if not specified)
+    samantha-llm start --persona NAME   Start a session with specific persona
+    samantha-llm personas          List registered personas
+    samantha-llm personas --set-default NAME  Set default persona
+    samantha-llm register-persona NAME FILE   Register a custom persona
+    samantha-llm register-persona NAME FILE --description DESC  Register with description
+    samantha-llm unregister-persona NAME      Remove a custom persona
     samantha-llm link              Link current directory to samantha-llm (create .ai-cerebrum symlink)
     samantha-llm unlink            Unlink current directory from samantha-llm (remove .ai-cerebrum symlink)
     samantha-llm qmd install       Install qmd (memory search engine) and dependencies
@@ -1119,6 +1324,18 @@ Examples:
 
     # Change default agent
     samantha-llm setup --default claude
+
+    # Register a custom persona
+    samantha-llm register-persona tax-accountant ./my-persona.md
+
+    # List personas
+    samantha-llm personas
+
+    # Start session with specific persona
+    samantha-llm start --persona tax-accountant
+
+    # Set default persona
+    samantha-llm personas --set-default tax-accountant
 
     # Unlink a project directory
     cd /path/to/project
@@ -1763,15 +1980,20 @@ def cmd_start(args):
     # Check for running subconscious worker and prompt user
     prompt_for_worker_wait(repo_path)
 
-    # Read bootstrap file
-    bootstrap_path = repo_path / bootstrap_file
-    if not bootstrap_path.exists():
-        print_error(f"Bootstrap file not found: {bootstrap_path}")
+    # Ensure config is migrated to latest version (for persona support)
+    config = ensure_config_migrated()
+
+    # Determine which persona to use
+    persona_name = args.persona if hasattr(args, 'persona') and args.persona else config.get('default_persona', 'samantha-hartwell')
+
+    # Generate bootstrap prompt with selected persona
+    bootstrap_content = generate_bootstrap_prompt(persona_name, config)
+    if not bootstrap_content:
+        print_error(f"Failed to generate bootstrap prompt for persona: {persona_name}")
         return 1
 
     try:
-        with open(bootstrap_path, 'r') as f:
-            bootstrap_content = f.read()
+        pass  # bootstrap_content already generated above
     except Exception as e:
         print_error(f"Failed to read bootstrap file: {e}")
         return 1
@@ -2452,6 +2674,223 @@ def cmd_memories(args):
         return 1
 
 
+# ============================================================================
+# Persona Commands
+# ============================================================================
+
+def cmd_register_persona(args):
+    """Register a custom persona"""
+    # Parse args: register-persona <name> <file> [--description <desc>]
+    name = args.subcommand
+    file_path = args.agent
+
+    if not name or not file_path:
+        print_error("Usage: samantha-llm register-persona <name> <file> [--description <desc>]")
+        print_info("")
+        print_info("Examples:")
+        print_info("  samantha-llm register-persona tax-accountant ./my-persona.md")
+        print_info("  samantha-llm register-persona artist ~/personas/artist.md --description 'Creative art critic'")
+        return 1
+
+    # Validate persona name
+    is_valid, error = validate_persona_name(name)
+    if not is_valid:
+        print_error(f"Invalid persona name: {error}")
+        return 1
+
+    # Check if file exists
+    source_path = Path(file_path).expanduser().resolve()
+    if not source_path.exists():
+        print_error(f"Persona file not found: {file_path}")
+        return 1
+
+    # Read config
+    config = ensure_config_migrated()
+    if not config:
+        print_error("Config not found. Run 'samantha-llm install' first.")
+        return 1
+
+    # Check if persona already exists
+    if name in config.get('personas', {}):
+        persona = config['personas'][name]
+        if persona.get('official'):
+            print_error(f"Cannot overwrite official persona: {name}")
+            return 1
+
+        print_warning(f"Persona '{name}' already exists")
+        response = input("Overwrite? (y/N): ").strip().lower()
+        if response != 'y':
+            print_info("Cancelled.")
+            return 0
+
+    # Create personas directory
+    personas_dir = get_personas_dir()
+    personas_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy file to personas directory
+    dest_path = personas_dir / f"{name}.md"
+    try:
+        shutil.copy2(source_path, dest_path)
+    except Exception as e:
+        print_error(f"Failed to copy persona file: {e}")
+        return 1
+
+    # Register in config
+    description = args.description if hasattr(args, 'description') and args.description else f"Custom persona: {name}"
+
+    if 'personas' not in config:
+        config['personas'] = {}
+
+    config['personas'][name] = {
+        'type': 'custom',
+        'file': str(dest_path),
+        'description': description,
+        'registered_at': datetime.now().isoformat()
+    }
+
+    # Save config
+    if not write_config(config):
+        print_error("Failed to save config")
+        return 1
+
+    print_success(f"Registered persona: {name}")
+    print_info(f"  File: {dest_path}")
+    print_info(f"  Description: {description}")
+    print()
+    print_info("Use with: samantha-llm start --persona {name}")
+
+    return 0
+
+
+def cmd_personas(args):
+    """List personas or set default"""
+    # Check for --set-default flag
+    set_default = args.default_agent if hasattr(args, 'default_agent') else None
+
+    # Read config
+    config = ensure_config_migrated()
+    if not config:
+        print_error("Config not found. Run 'samantha-llm install' first.")
+        return 1
+
+    if set_default:
+        # Set default persona
+        if 'personas' not in config or set_default not in config['personas']:
+            print_error(f"Persona not found: {set_default}")
+            print_info("Available personas:")
+            for name, _ in list_personas(config):
+                print_info(f"  - {name}")
+            return 1
+
+        config['default_persona'] = set_default
+
+        if not write_config(config):
+            print_error("Failed to save config")
+            return 1
+
+        print_success(f"Default persona set to: {set_default}")
+        return 0
+
+    # List personas
+    personas = list_personas(config)
+
+    if not personas:
+        print_info("No personas registered.")
+        print_info("Register a persona with: samantha-llm register-persona <name> <file>")
+        return 0
+
+    default_persona = config.get('default_persona')
+
+    print_info("Available personas:")
+    print()
+
+    for name, persona in personas:
+        is_default = (name == default_persona)
+        is_builtin = persona.get('type') == 'builtin'
+
+        # Format line
+        prefix = "  * " if is_default else "    "
+        suffix = " [builtin]" if is_builtin else " [custom]"
+        if is_default:
+            suffix += " (default)"
+
+        description = persona.get('description', '')
+
+        print_info(f"{prefix}{name}{suffix}")
+        if description:
+            print_info(f"      {description}")
+
+    print()
+    print_info("Commands:")
+    print_info("  samantha-llm personas --set-default <name>  - Set default persona")
+    print_info("  samantha-llm start --persona <name>         - Use specific persona")
+
+    return 0
+
+
+def cmd_unregister_persona(args):
+    """Unregister a custom persona"""
+    name = args.subcommand
+
+    if not name:
+        print_error("Usage: samantha-llm unregister-persona <name>")
+        print_info("")
+        print_info("Example:")
+        print_info("  samantha-llm unregister-persona tax-accountant")
+        return 1
+
+    # Read config
+    config = ensure_config_migrated()
+    if not config:
+        print_error("Config not found.")
+        return 1
+
+    # Check if persona exists
+    if 'personas' not in config or name not in config['personas']:
+        print_error(f"Persona not found: {name}")
+        return 1
+
+    persona = config['personas'][name]
+
+    # Cannot unregister builtin personas
+    if persona.get('official') or persona.get('type') == 'builtin':
+        print_error(f"Cannot unregister official persona: {name}")
+        return 1
+
+    # Cannot unregister default persona
+    if config.get('default_persona') == name:
+        print_error(f"Cannot unregister default persona: {name}")
+        print_info("Set a different default first with: samantha-llm personas --set-default <name>")
+        return 1
+
+    # Confirm deletion
+    print_warning(f"This will permanently delete persona: {name}")
+    response = input("Continue? (y/N): ").strip().lower()
+    if response != 'y':
+        print_info("Cancelled.")
+        return 0
+
+    # Delete file if it exists
+    persona_file = Path(persona['file']).expanduser()
+    if persona_file.exists():
+        try:
+            persona_file.unlink()
+            print_info(f"Deleted file: {persona_file}")
+        except Exception as e:
+            print_warning(f"Failed to delete file: {e}")
+
+    # Remove from config
+    del config['personas'][name]
+
+    if not write_config(config):
+        print_error("Failed to save config")
+        return 1
+
+    print_success(f"Unregistered persona: {name}")
+
+    return 0
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -2460,14 +2899,18 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'help', 'version'],
+                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'personas', 'register-persona', 'unregister-persona', 'help', 'version'],
                         help='Command to execute')
     parser.add_argument('subcommand', nargs='?', default=None,
                         help='Subcommand (for qmd command)')
     parser.add_argument('agent', nargs='?', default=None,
                         help='Agent name (for start command)')
     parser.add_argument('--default', dest='default_agent', metavar='AGENT',
-                        help='Set default agent (for setup command)')
+                        help='Set default agent/persona (for setup/personas command)')
+    parser.add_argument('--persona', dest='persona', metavar='NAME',
+                        help='Persona to use (for start command)')
+    parser.add_argument('--description', dest='description', metavar='DESC',
+                        help='Description for persona (for register-persona command)')
 
     args = parser.parse_args()
 
@@ -2483,6 +2926,9 @@ def main():
         'qmd': cmd_qmd,
         'memories': cmd_memories,
         'subconscious': cmd_subconscious,
+        'personas': cmd_personas,
+        'register-persona': cmd_register_persona,
+        'unregister-persona': cmd_unregister_persona,
         'help': cmd_help,
         'version': cmd_version,
     }
