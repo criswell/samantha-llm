@@ -1913,7 +1913,8 @@ def cmd_start(args):
         return 1
 
     # Determine which agent to use
-    agent_name = args.agent if hasattr(args, 'agent') and args.agent else config.get('default_agent')
+    # NOTE: Due to positional arg parsing, agent name might be in subcommand position
+    agent_name = args.agent or args.subcommand or config.get('default_agent')
 
     if not agent_name:
         print_error("No agent configured")
@@ -2911,8 +2912,14 @@ def main():
                         help='Persona to use (for start command)')
     parser.add_argument('--description', dest='description', metavar='DESC',
                         help='Description for persona (for register-persona command)')
+    parser.add_argument('--help', '-h', action='store_true',
+                        help='Show help message')
 
     args = parser.parse_args()
+
+    # Handle --help flag
+    if hasattr(args, 'help') and args.help:
+        return cmd_help(args)
 
     commands = {
         'install': cmd_install,

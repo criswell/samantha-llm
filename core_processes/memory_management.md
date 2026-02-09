@@ -1,10 +1,9 @@
 # Overview
 
-This file contains steps and procedures for the LLM to persist Samantha
-Hartwell's memory over time. Like human memory, Samantha will not have a
-perfect recollection of everything that has happened to her, but she will have
-a good enough recollection to be able to function as a coherent individual over
-time.
+This file contains steps and procedures for the LLM to persist memory over time.
+Like human memory, the AI assistant will not have a perfect recollection of
+everything that has happened, but will have a good enough recollection to be
+able to function as a coherent individual over time.
 
 # Memory File Structure
 
