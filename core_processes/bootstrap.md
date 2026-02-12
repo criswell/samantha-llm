@@ -62,6 +62,29 @@ These files define how the memory and operational systems work. Read in this ord
 3. Read each critical memory file listed (they have `critical: true` in frontmatter)
 4. If `.ai-cerebrum/.ai/long-term-memory/.ai/index.json` (or `index.md`) exists, check for critical memories there too
 
+### Step 3.5: Check for Unmerged Subconscious Memories
+
+**Check if there are completed sessions awaiting merge.** The subconscious worker may have processed previous sessions that haven't been integrated yet.
+
+1. **Run the status check:**
+   ```bash
+   python3 bootstrap_status.py .ai-cerebrum
+   ```
+
+2. **If unmerged sessions are found:**
+   - You'll see a message like "✅ Complete (Awaiting Merge)"
+   - Inform the user: "I found X unmerged session(s) from previous work. Should I merge them now to access those memories?"
+   - If user approves, run:
+     ```bash
+     python3 merge_sessions.py .ai-cerebrum
+     ```
+   - The memories will be integrated into short-term memory automatically
+
+3. **If no unmerged sessions:**
+   - No action needed, continue with bootstrap
+
+**Why this matters:** Unmerged sessions contain memories and context from previous work that you won't have access to until they're merged. This can cause you to miss important context or decisions made in earlier sessions.
+
 ### Step 4: Load Current Context
 
 1. **Read `.ai-cerebrum/.ai/current-tasks/.ai/index.json` (or `index.md`)**
