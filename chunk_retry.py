@@ -32,6 +32,44 @@ try:
 except Exception:
     HAS_ANALYZER = False
 
+# Import Anthropic API analyzer
+try:
+    anthropic_analyzer_path = Path(__file__).parent / 'anthropic_analyzer.py'
+    spec = importlib.util.spec_from_file_location("anthropic_analyzer", anthropic_analyzer_path)
+    anthropic_analyzer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(anthropic_analyzer)
+    HAS_ANTHROPIC_ANALYZER = True
+except Exception:
+    HAS_ANTHROPIC_ANALYZER = False
+
+
+def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None):
+    """
+    Create the best available analyzer with fallback logic.
+
+    Priority:
+    1. Anthropic API (if ANTHROPIC_API_KEY is set) - works with all agents
+    2. Claude CLI (if available) - backward compatibility
+    3. Fail with helpful error
+    """
+    import os
+
+    # Try Anthropic API first (most reliable)
+    if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
+        return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # Fall back to Claude CLI
+    if HAS_ANALYZER:
+        return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # No analyzer available
+    raise RuntimeError(
+        "No LLM analyzer available. Options:\n"
+        "1. Set ANTHROPIC_API_KEY environment variable to use Anthropic API\n"
+        "2. Install Claude CLI (claude command) and ensure it's in PATH\n"
+        "3. Install anthropic package: pip install anthropic"
+    )
+
 
 def get_failed_chunks(workspace: SessionWorkspace) -> list:
     """
@@ -96,7 +134,7 @@ def retry_chunk(
 
     try:
         # Analyze chunk
-        analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=workspace.analyses_dir)
+        analyzer = create_best_analyzer(prompt_path, output_dir=workspace.analyses_dir)
         result = analyzer.analyze(chunk_file)
 
         workspace.log(f"[RETRY] Chunk {chunk_num} complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions")

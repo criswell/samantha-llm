@@ -50,6 +50,19 @@ try:
 except Exception:
     HAS_ANALYZER = False
 
+# Import Anthropic API analyzer if available
+try:
+    anthropic_analyzer_path = Path(__file__).parent / 'anthropic_analyzer.py'
+    if anthropic_analyzer_path.exists():
+        spec = importlib.util.spec_from_file_location("anthropic_analyzer", anthropic_analyzer_path)
+        anthropic_analyzer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(anthropic_analyzer)
+        HAS_ANTHROPIC_ANALYZER = True
+    else:
+        HAS_ANTHROPIC_ANALYZER = False
+except Exception:
+    HAS_ANTHROPIC_ANALYZER = False
+
 # Import conversation chunker if available
 try:
     chunker_path = Path(__file__).parent / 'conversation_chunker.py'
@@ -64,12 +77,60 @@ except Exception:
     HAS_CHUNKER = False
 
 
+def get_best_analyzer():
+    """Select the best available analyzer with fallback logic."""
+    if HAS_ANTHROPIC_ANALYZER:
+        return anthropic_analyzer
+    elif HAS_ANALYZER:
+        return claude_analyzer
+    else:
+        return None
+
+
 def log(log_file: Path, message: str):
     """Write to processing log."""
     with open(log_file, 'a') as f:
         timestamp = datetime.now().isoformat()
         f.write(f"{timestamp} {message}\n")
         f.flush()
+
+
+def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None):
+    """
+    Create the best available analyzer with fallback logic.
+
+    Priority:
+    1. Anthropic API (if ANTHROPIC_API_KEY is set) - works with all agents
+    2. Claude CLI (if available) - backward compatibility
+    3. Fail with helpful error
+
+    Args:
+        prompt_path: Path to analysis prompt
+        output_dir: Optional directory for raw output
+
+    Returns:
+        Configured analyzer instance
+
+    Raises:
+        RuntimeError: If no analyzer is available
+    """
+    import os
+
+    # Try Anthropic API first (most reliable)
+    if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
+        return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # Fall back to Claude CLI
+    if HAS_ANALYZER:
+        return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # No analyzer available
+    raise RuntimeError(
+        "No LLM analyzer available. Options:\n"
+        "1. Set ANTHROPIC_API_KEY environment variable to use Anthropic API\n"
+        "2. Install Claude CLI (claude command) and ensure it's in PATH\n"
+        "3. Install anthropic package: pip install anthropic"
+    )
 
 
 def load_transcript(filepath: Path) -> list:
@@ -189,7 +250,7 @@ def _analyze_with_chunking(
         workspace.init_chunk_manifest(len(chunks))
 
     # Create analyzer with output_dir to save raw LLM output for each chunk
-    analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
+    analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir)
 
     # Process each chunk with context from previous chunks
     chunk_results = []
@@ -415,7 +476,7 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
             parsed_file.write_text(conversation_text)
 
             # Create analyzer and run analysis
-            analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
+            analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir)
             result = analyzer.analyze(parsed_file)
 
             log_func(f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
