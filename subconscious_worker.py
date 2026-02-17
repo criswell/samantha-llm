@@ -95,18 +95,19 @@ def log(log_file: Path, message: str):
         f.flush()
 
 
-def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None):
+def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, agent: str = 'claude'):
     """
     Create the best available analyzer with fallback logic.
 
     Priority:
-    1. Anthropic API (if ANTHROPIC_API_KEY is set) - works with all agents
-    2. Claude CLI (if available) - backward compatibility
-    3. Fail with helpful error
+    1. For non-Claude agents (abacus, copilot, etc.): Require Anthropic API
+    2. For Claude agent: Prefer Anthropic API, fallback to Claude CLI
+    3. Fail with helpful error if requirements not met
 
     Args:
         prompt_path: Path to analysis prompt
         output_dir: Optional directory for raw output
+        agent: Agent name from session metadata (claude, abacus, etc.)
 
     Returns:
         Configured analyzer instance
@@ -116,11 +117,22 @@ def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None):
     """
     import os
 
-    # Try Anthropic API first (most reliable)
+    # For non-Claude agents, require Anthropic API (they can't use Claude CLI)
+    if agent != 'claude':
+        if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
+            return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+        else:
+            raise RuntimeError(
+                f"Session was run with '{agent}' agent, which requires Anthropic API for analysis.\n"
+                "Please set ANTHROPIC_API_KEY environment variable.\n"
+                "The Claude CLI cannot be used to analyze sessions from other agents."
+            )
+
+    # For Claude agent, try Anthropic API first (most reliable), then Claude CLI
     if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
         return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
 
-    # Fall back to Claude CLI
+    # Fall back to Claude CLI for Claude agent sessions
     if HAS_ANALYZER:
         return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
 
@@ -222,7 +234,8 @@ def _analyze_with_chunking(
     analyses_dir: Path,
     parsed_dir: Path,
     log_func,
-    workspace: Optional['SessionWorkspace'] = None
+    workspace: Optional['SessionWorkspace'] = None,
+    agent: str = 'claude'
 ):
     """
     Analyze long conversation using chunking with context passing.
@@ -235,6 +248,7 @@ def _analyze_with_chunking(
         parsed_dir: Directory for parsed text
         log_func: Logging function to call
         workspace: Optional SessionWorkspace for manifest tracking
+        agent: Agent name from session metadata
 
     Returns:
         Combined AnalysisResult from all chunks
@@ -250,7 +264,7 @@ def _analyze_with_chunking(
         workspace.init_chunk_manifest(len(chunks))
 
     # Create analyzer with output_dir to save raw LLM output for each chunk
-    analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir)
+    analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir, agent=agent)
 
     # Process each chunk with context from previous chunks
     chunk_results = []
@@ -445,15 +459,17 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
             analyses_dir = recordings_dir.parent / 'analyses'
             analyses_dir.mkdir(exist_ok=True)
 
-        # Get conversation text
+        # Get conversation text and agent info
         session_id = terminal_data.get('metadata', {}).get('session_id', 'unknown')
+        agent = terminal_data.get('metadata', {}).get('agent', 'claude')
         conversation_text = terminal_data['raw_text']
         text_size = len(conversation_text)
 
         log_func(f"[LLM] Conversation size: {text_size:,} characters")
+        log_func(f"[LLM] Session agent: {agent}")
 
         # Check if chunking is needed
-        CHUNK_THRESHOLD = 150000  # ~200K tokens with prompt
+        CHUNK_THRESHOLD = 150000
         needs_chunking = text_size > CHUNK_THRESHOLD and HAS_CHUNKER
 
         if needs_chunking:
@@ -465,7 +481,8 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
                 analyses_dir,
                 parsed_dir,
                 log_func,
-                workspace
+                workspace,
+                agent
             )
         else:
             # Single-pass analysis (original behavior)
@@ -476,7 +493,7 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
             parsed_file.write_text(conversation_text)
 
             # Create analyzer and run analysis
-            analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir)
+            analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir, agent=agent)
             result = analyzer.analyze(parsed_file)
 
             log_func(f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")

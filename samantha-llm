@@ -1767,7 +1767,8 @@ def spawn_subconscious_worker(transcript_file: Path, cerebrum_path: Path):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                close_fds=True
+                close_fds=True,
+                env=os.environ
             )
         else:
             # Unix (Linux/Mac): Use start_new_session
@@ -1777,7 +1778,8 @@ def spawn_subconscious_worker(transcript_file: Path, cerebrum_path: Path):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                close_fds=True
+                close_fds=True,
+                env=os.environ
             )
     except Exception as e:
         # Silently fail - don't interrupt user experience
