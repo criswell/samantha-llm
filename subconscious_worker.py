@@ -76,6 +76,19 @@ try:
 except Exception:
     HAS_CHUNKER = False
 
+# Import procedural extractor if available
+try:
+    extractor_path = Path(__file__).parent / 'procedural_extractor.py'
+    if extractor_path.exists():
+        spec = importlib.util.spec_from_file_location("procedural_extractor", extractor_path)
+        procedural_extractor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(procedural_extractor)
+        HAS_PROCEDURAL = True
+    else:
+        HAS_PROCEDURAL = False
+except Exception:
+    HAS_PROCEDURAL = False
+
 
 def get_best_analyzer():
     """Select the best available analyzer with fallback logic."""
@@ -813,6 +826,37 @@ def main():
                 log_func(f"[LLM] Found {len(llm_analysis.get('patterns', []))} patterns, {len(llm_analysis.get('decisions', []))} decisions")
             else:
                 log_func("[LLM] Analysis not available, falling back to basic processing")
+
+        # Phase 3.5: Procedural memory extraction
+        if llm_analysis and HAS_PROCEDURAL and workspace:
+            try:
+                procedural_prompt = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'prompts' / 'procedural-analysis-prompt.txt'
+
+                # Find the full analysis file (contains detailed Part 1 + Part 2)
+                if workspace:
+                    analyses_dir = workspace.analyses_dir
+                else:
+                    analyses_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'analyses'
+
+                analysis_file = analyses_dir / f'analysis_{session_id}_full.md'
+                if not analysis_file.exists():
+                    # Single-pass sessions don't have _full suffix
+                    analysis_file = analyses_dir / f'analysis_{session_id}.md'
+
+                if analysis_file.exists() and procedural_prompt.exists():
+                    log_func("[PROCEDURAL] Starting procedural pattern extraction...")
+                    procedural_extractor.extract_procedural_patterns(
+                        analysis_file=analysis_file,
+                        prompt_path=procedural_prompt,
+                        output_dir=workspace.procedural_dir,
+                        session_id=session_id,
+                        log_func=log_func
+                    )
+                else:
+                    log_func("[PROCEDURAL] Skipping - analysis file or prompt not found")
+            except Exception as e:
+                # Non-fatal — procedural extraction failure shouldn't block the pipeline
+                log_func(f"[PROCEDURAL] Extraction failed (non-fatal): {e}")
 
         # Phase 4: Memory creation (if LLM analysis available)
         memory_file = None

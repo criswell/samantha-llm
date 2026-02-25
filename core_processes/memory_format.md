@@ -307,6 +307,103 @@ Key takeaways and lessons from this project.
 [... rest of status file with full history ...]
 ```
 
+## Format of Procedural Memory Files (Runbooks)
+
+Procedural memory files are compiled operational knowledge for specific domains
+or projects. They are built from repeated sessions, not single events, and
+contain the "how to work on X" knowledge that prevents re-discovery.
+
+### Filename Convention
+`domain-name.md` — named by domain, not by date (these are living documents)
+
+Examples:
+- `mortar-development.md`
+- `arcadia-game-engine.md`
+- `circleci-orb-publishing.md`
+
+### Template
+
+```yaml
+---
+date: 2026-02-25
+updated: 2026-02-25
+domain: domain-name
+topics: [tag1, tag2]
+type: runbook
+confidence: low|medium|high
+triggers:
+  positive:
+    repo_signals: ["repo-name"]
+    path_signals: ["src/key/file.py", "config/important.yml"]
+    keyword_signals: ["specific term", "tool name"]
+    domain_signals: ["broader context description"]
+  negative:
+    - signal: "misleading signal description"
+      reason: "why this causes false positives"
+      added: 2026-02-25
+corrections:
+  - date: 2026-02-25
+    trigger: "what caused wrong match"
+    wrong_interpretation: "what was assumed"
+    correct_interpretation: "what is actually true"
+    action: "what was fixed"
+---
+
+# Domain Runbook Title
+
+## Project Locations
+| Component | Path |
+|-----------|------|
+| Main repo | `/path/to/repo` |
+| Key source | `repo/src/module/` |
+
+## Key Architecture
+How the system works. Relationships between components.
+Deployment model. Data flow.
+
+## Common Operations
+Step-by-step procedures for frequent tasks.
+Commands, scripts, testing workflows.
+
+## Critical Knowledge
+Must-know facts specific to this domain.
+Gotchas, non-obvious behaviors, things that waste time if forgotten.
+```
+
+### Runbook-Specific Fields
+
+- `domain`: Short identifier for the operational domain (used in index)
+- `type`: Always `runbook` for procedural memory
+- `confidence`: How reliable the runbook's content and triggers are
+  - `low`: New runbook, triggers not yet validated
+  - `medium`: Used across a few sessions, some refinement done
+  - `high`: Well-tested triggers, content verified multiple times
+- `triggers`: Multi-signal matching rules (see memory_management.md for details)
+- `corrections`: Log of times triggers or content were wrong and how they were fixed
+
+### Procedural Memory Index Format
+
+```json
+{
+  "last_updated": "2026-02-25",
+  "total_runbooks": 1,
+  "runbooks": [
+    {
+      "file": "domain-name.md",
+      "domain": "domain-name",
+      "summary": "One-line description of what this runbook covers",
+      "triggers": { "positive": {}, "negative": [] },
+      "confidence": "medium",
+      "corrections_count": 0
+    }
+  ],
+  "loading_strategy": {
+    "minimum_positive_categories": 2,
+    "negative_signals_are_veto": true
+  }
+}
+```
+
 ## Maintenance Guidelines
 
 ### When to Regenerate Index Files

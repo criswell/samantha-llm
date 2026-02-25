@@ -107,6 +107,29 @@ These files define how the memory and operational systems work. Read in this ord
    - Focus on high-importance entries
    - Read memories tagged with active project names
 
+### Step 4.5: Load Procedural Memory (Runbooks)
+
+Check for operational runbooks that match the current context:
+
+1. **Read `.ai-cerebrum/.ai/procedural-memory/.ai/index.json`**
+   - Contains the runbook registry with trigger definitions
+   - If this file doesn't exist, skip this step
+
+2. **Evaluate triggers against current context**
+   - Collect signals: current repo name, file paths visible, user's initial message keywords
+   - For each runbook in the index, check positive triggers against available signals
+   - **Require 2+ positive signals from different categories** (repo, path, keyword, domain)
+   - **Veto if any negative signals match**
+
+3. **Load matching runbooks**
+   - Read the full runbook file for any that match
+   - These provide operational knowledge: project locations, architecture, workflows, testing procedures
+   - Check the `corrections` section for known pitfalls
+
+4. **Mid-session re-evaluation**
+   - If context shifts during a session (user switches projects, mentions a new domain), re-check triggers
+   - Load additional runbooks as needed — procedural memory is lazy-loaded, not all-at-once
+
 ### Step 5: Check Project-Specific Context
 
 1. **Determine current working directory**
