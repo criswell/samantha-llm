@@ -100,14 +100,14 @@ def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, a
     Create the best available analyzer with fallback logic.
 
     Priority:
-    1. For non-Claude agents (abacus, copilot, etc.): Require Anthropic API
-    2. For Claude agent: Prefer Anthropic API, fallback to Claude CLI
-    3. Fail with helpful error if requirements not met
+    1. Anthropic API (preferred - most reliable)
+    2. Claude CLI (fallback)
+    3. Fail with helpful error if neither available
 
     Args:
         prompt_path: Path to analysis prompt
         output_dir: Optional directory for raw output
-        agent: Agent name from session metadata (claude, abacus, etc.)
+        agent: Agent name from session metadata (informational only)
 
     Returns:
         Configured analyzer instance
@@ -117,22 +117,11 @@ def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, a
     """
     import os
 
-    # For non-Claude agents, require Anthropic API (they can't use Claude CLI)
-    if agent != 'claude':
-        if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
-            return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
-        else:
-            raise RuntimeError(
-                f"Session was run with '{agent}' agent, which requires Anthropic API for analysis.\n"
-                "Please set ANTHROPIC_API_KEY environment variable.\n"
-                "The Claude CLI cannot be used to analyze sessions from other agents."
-            )
-
-    # For Claude agent, try Anthropic API first (most reliable), then Claude CLI
+    # Try Anthropic API first (preferred - most reliable)
     if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
         return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
 
-    # Fall back to Claude CLI for Claude agent sessions
+    # Fall back to Claude CLI
     if HAS_ANALYZER:
         return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
 
