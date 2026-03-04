@@ -10,10 +10,11 @@ This script:
 """
 
 import sys
+import json
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 # Import session workspace
 try:
@@ -143,6 +144,312 @@ def archive_session(cerebrum_path: Path, workspace: SessionWorkspace):
     shutil.move(str(workspace.root), str(archive_dir))
 
 
+def merge_procedural_observations(cerebrum_path: Path, sessions: List[Tuple[SessionWorkspace, dict]]):
+    """
+    Merge procedural memory observations from completed sessions into runbooks.
+
+    For each session's procedural observations:
+    - If observations match an existing runbook domain: update that runbook's content
+    - If observations suggest a new domain: create a draft runbook (confidence: low)
+    - If corrections found: propagate to matching runbooks
+
+    Args:
+        cerebrum_path: Path to cerebrum root
+        sessions: List of (workspace, status) tuples for completed sessions
+    """
+    procedural_dir = cerebrum_path / '.ai' / 'procedural-memory' / '.ai'
+    index_file = procedural_dir / 'index.json'
+
+    # Load existing index (or create empty)
+    if index_file.exists():
+        with open(index_file) as f:
+            index = json.load(f)
+    else:
+        procedural_dir.mkdir(parents=True, exist_ok=True)
+        index = {
+            'last_updated': '',
+            'description': 'Procedural memory registry.',
+            'total_runbooks': 0,
+            'runbooks': [],
+            'loading_strategy': {
+                'minimum_positive_categories': 2,
+                'negative_signals_are_veto': True
+            }
+        }
+
+    # Build domain lookup from existing runbooks
+    domain_lookup = {}
+    for rb in index.get('runbooks', []):
+        domain_lookup[rb['domain']] = rb
+
+    # Collect all observations from all sessions
+    all_observations = []
+    all_recommendations = []
+    all_corrections = []
+
+    for workspace, status in sessions:
+        procedural_session_dir = workspace.procedural_dir
+        if not procedural_session_dir.exists():
+            continue
+
+        for obs_file in procedural_session_dir.glob('procedural_*.json'):
+            if obs_file.name.endswith('_raw.txt'):
+                continue
+            try:
+                with open(obs_file) as f:
+                    data = json.load(f)
+
+                if not data.get('session_had_procedural_patterns', False):
+                    continue
+
+                all_observations.extend(data.get('observations', []))
+                all_recommendations.extend(data.get('runbook_recommendations', []))
+                all_corrections.extend(data.get('corrections_to_propagate', []))
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"  [WARN] Failed to read {obs_file}: {e}")
+
+    if not all_observations and not all_recommendations and not all_corrections:
+        print("  No procedural observations to merge")
+        return
+
+    print(f"  Found {len(all_observations)} observations, {len(all_recommendations)} recommendations, {len(all_corrections)} corrections")
+
+    updated_domains = set()
+
+    # Process corrections first (they modify existing runbooks)
+    for correction in all_corrections:
+        domain = correction.get('domain', '')
+        if domain in domain_lookup:
+            _apply_correction_to_runbook(procedural_dir, domain, correction)
+            updated_domains.add(domain)
+            print(f"  Applied correction to {domain}: {correction.get('wrong_assumption', '')[:60]}")
+
+    # Process recommendations
+    for rec in all_recommendations:
+        domain = rec.get('domain', '')
+        action = rec.get('action', 'create')
+
+        if action == 'create' and domain not in domain_lookup:
+            # Create new draft runbook
+            _create_draft_runbook(procedural_dir, index, rec, all_observations)
+            domain_lookup[domain] = index['runbooks'][-1]  # newly added
+            updated_domains.add(domain)
+            print(f"  Created draft runbook: {domain}")
+
+        elif action == 'update' and domain in domain_lookup:
+            _update_runbook_content(procedural_dir, domain, rec, all_observations)
+            updated_domains.add(domain)
+            print(f"  Updated runbook: {domain}")
+
+        elif action == 'split' and domain in domain_lookup:
+            # Splitting is complex — log it for manual review
+            print(f"  [NOTE] Runbook split recommended for {domain}: {rec.get('reason', '')}")
+
+    # Update observations into existing runbooks that weren't explicitly recommended
+    for obs in all_observations:
+        domain = obs.get('domain', '')
+        if domain in domain_lookup and domain not in updated_domains:
+            _merge_observation_signals(procedural_dir, index, domain, obs)
+            updated_domains.add(domain)
+
+    # Update index
+    if updated_domains:
+        index['last_updated'] = datetime.now().strftime('%Y-%m-%d')
+        index['total_runbooks'] = len(index['runbooks'])
+        with open(index_file, 'w') as f:
+            json.dump(index, f, indent=2)
+        print(f"  ✓ Updated procedural memory index ({len(updated_domains)} domains touched)")
+
+
+def _apply_correction_to_runbook(procedural_dir: Path, domain: str, correction: Dict[str, Any]):
+    """Apply a correction to an existing runbook's YAML frontmatter."""
+    runbook_file = procedural_dir / f'{domain}.md'
+    if not runbook_file.exists():
+        return
+
+    content = runbook_file.read_text()
+
+    # Find the corrections section in YAML frontmatter and append
+    correction_entry = (
+        f"\n  - date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        f"    trigger: \"{correction.get('wrong_assumption', 'unknown')}\"\n"
+        f"    wrong_interpretation: \"{correction.get('wrong_assumption', '')}\"\n"
+        f"    correct_interpretation: \"{correction.get('correction', '')}\"\n"
+        f"    action: \"{correction.get('trigger_impact', 'Added from subconscious analysis')}\""
+    )
+
+    # Try to append to existing corrections section
+    if 'corrections:' in content:
+        # Insert before the closing --- of frontmatter
+        content = content.replace('corrections:', 'corrections:' + correction_entry, 1)
+    else:
+        # Add corrections section before closing ---
+        parts = content.split('---\n', 2)
+        if len(parts) >= 3:
+            parts[1] = parts[1].rstrip() + f"\ncorrections:{correction_entry}\n"
+            content = '---\n'.join(parts)
+
+    # Add anti-signal from correction if specified
+    trigger_impact = correction.get('trigger_impact', '')
+    if trigger_impact and 'negative:' in content:
+        anti_entry = (
+            f"\n    - signal: \"{correction.get('wrong_assumption', '')}\"\n"
+            f"      reason: \"{correction.get('correction', '')}\"\n"
+            f"      added: {datetime.now().strftime('%Y-%m-%d')}"
+        )
+        content = content.replace('  negative:', '  negative:' + anti_entry, 1)
+
+    # Update the updated date
+    today = datetime.now().strftime('%Y-%m-%d')
+    if 'updated:' in content:
+        import re
+        content = re.sub(r'updated: \d{4}-\d{2}-\d{2}', f'updated: {today}', content, count=1)
+
+    runbook_file.write_text(content)
+
+
+def _create_draft_runbook(procedural_dir: Path, index: Dict, recommendation: Dict, observations: list):
+    """Create a new draft runbook from a recommendation."""
+    domain = recommendation['domain']
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    # Collect trigger signals from observations for this domain
+    triggers = {'repo_signals': [], 'path_signals': [], 'keyword_signals': [], 'domain_signals': []}
+    paths_seen = set()
+    keywords_seen = set()
+
+    for obs in observations:
+        if obs.get('domain') == domain:
+            suggested = obs.get('suggested_triggers', {})
+            for category in triggers:
+                for signal in suggested.get(category, []):
+                    if signal not in triggers[category]:
+                        triggers[category].append(signal)
+            paths_seen.update(obs.get('paths_encountered', []))
+            keywords_seen.update(obs.get('keywords', []))
+
+    # Build negative signals
+    anti_signals = recommendation.get('suggested_anti_signals', [])
+    negative_yaml = ''
+    for anti in anti_signals:
+        negative_yaml += (
+            f"\n    - signal: \"{anti.get('signal', '')}\"\n"
+            f"      reason: \"{anti.get('reason', '')}\"\n"
+            f"      added: {today}"
+        )
+
+    # Build key knowledge section
+    key_knowledge = recommendation.get('key_knowledge', [])
+    knowledge_lines = '\n'.join(f'- {k}' for k in key_knowledge) if key_knowledge else '- (Populated from session observations)'
+
+    # Build paths table
+    paths_table = ''
+    for p in sorted(paths_seen):
+        paths_table += f'| {p.split("/")[-1]} | `{p}` |\n'
+    if not paths_table:
+        paths_table = '| (auto-populated) | (from future sessions) |\n'
+
+    content = f"""---
+date: {today}
+updated: {today}
+domain: {domain}
+topics: [{', '.join(keywords_seen) if keywords_seen else domain}]
+type: runbook
+confidence: low
+triggers:
+  positive:
+    repo_signals: {json.dumps(triggers['repo_signals'])}
+    path_signals: {json.dumps(triggers['path_signals'])}
+    keyword_signals: {json.dumps(triggers['keyword_signals'])}
+    domain_signals: {json.dumps(triggers['domain_signals'])}
+  negative:{negative_yaml if negative_yaml else ' []'}
+corrections: []
+---
+
+# {domain.replace('-', ' ').title()} Runbook
+
+*Draft — auto-generated from subconscious analysis. Confidence: low.*
+*Reason: {recommendation.get('reason', 'Procedural patterns detected')}*
+
+## Project Locations
+
+| Component | Path |
+|-----------|------|
+{paths_table}
+## Key Architecture
+
+{knowledge_lines}
+
+## Common Operations
+
+(To be populated from additional session observations)
+
+## Critical Knowledge
+
+(To be populated from corrections and repeated patterns)
+"""
+
+    runbook_file = procedural_dir / f'{domain}.md'
+    runbook_file.write_text(content)
+
+    # Add to index
+    index_entry = {
+        'file': f'{domain}.md',
+        'domain': domain,
+        'summary': recommendation.get('reason', f'Auto-generated runbook for {domain}'),
+        'triggers': {
+            'positive': triggers,
+            'negative': [{'signal': a.get('signal', ''), 'reason': a.get('reason', '')} for a in anti_signals]
+        },
+        'confidence': 'low',
+        'corrections_count': 0
+    }
+    index['runbooks'].append(index_entry)
+
+
+def _update_runbook_content(procedural_dir: Path, domain: str, recommendation: Dict, observations: list):
+    """Update an existing runbook with new knowledge from observations."""
+    runbook_file = procedural_dir / f'{domain}.md'
+    if not runbook_file.exists():
+        return
+
+    content = runbook_file.read_text()
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    # Append new knowledge to the end of the file
+    new_knowledge = recommendation.get('key_knowledge', [])
+    if new_knowledge:
+        update_section = f"\n\n## Update {today} (auto-generated)\n\n"
+        for item in new_knowledge:
+            update_section += f"- {item}\n"
+        content += update_section
+
+    # Update the updated date
+    import re
+    content = re.sub(r'updated: \d{4}-\d{2}-\d{2}', f'updated: {today}', content, count=1)
+
+    runbook_file.write_text(content)
+
+
+def _merge_observation_signals(procedural_dir: Path, index: Dict, domain: str, observation: Dict):
+    """Merge trigger signals from an observation into an existing runbook's index entry."""
+    for rb in index.get('runbooks', []):
+        if rb['domain'] == domain:
+            suggested = observation.get('suggested_triggers', {})
+            existing = rb.get('triggers', {}).get('positive', {})
+
+            for category in ['repo_signals', 'path_signals', 'keyword_signals', 'domain_signals']:
+                existing_signals = existing.get(category, [])
+                new_signals = suggested.get(category, [])
+                for signal in new_signals:
+                    if signal not in existing_signals:
+                        existing_signals.append(signal)
+                existing[category] = existing_signals
+
+            rb['triggers']['positive'] = existing
+            break
+
+
 def merge_completed_sessions(cerebrum_path: Path, dry_run: bool = False):
     """
     Merge all completed sessions.
@@ -174,10 +481,14 @@ def merge_completed_sessions(cerebrum_path: Path, dry_run: bool = False):
     print("  1. Merging guidance files...", end='', flush=True)
     merge_guidance_files(cerebrum_path, completed)
 
+    # Merge procedural memory observations
+    print("  2. Merging procedural observations...")
+    merge_procedural_observations(cerebrum_path, completed)
+
     # Move memories and archive each session
     total_memories = 0
     for workspace, status in completed:
-        print(f"  2. Processing {workspace.session_id}...", end='', flush=True)
+        print(f"  3. Processing {workspace.session_id}...", end='', flush=True)
 
         # Move memories
         memory_count = move_memories(cerebrum_path, workspace)

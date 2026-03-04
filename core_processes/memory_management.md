@@ -351,3 +351,156 @@ When initializing, the bootstrap process should surface memories in this priorit
 - These provide recent context that may be relevant
 
 This tiered approach ensures critical information is never missed while keeping bootstrap time reasonable.
+
+# Procedural Memory (Runbooks)
+
+Procedural memory is a distinct memory type modeled after how biological brains store "how to do things" — compiled operational knowledge built through repetition, not single events.
+
+Unlike declarative memory (facts) or episodic memory (events), procedural memory stores **operational workflows**: project locations, architecture understanding, testing procedures, deployment pipelines, and the relationships between components. It's the difference between knowing *that* mortar deploys CI configs (a fact) and knowing *how* to work on mortar (a procedure).
+
+## Directory Structure
+
+```
+.ai-cerebrum/.ai/procedural-memory/.ai/
+├── index.json          # Runbook registry with trigger definitions
+└── mortar-development.md  # Example runbook
+```
+
+## When to Create a Runbook
+
+Create a procedural memory runbook when:
+- You find yourself re-discovering the same project structure or workflow across sessions
+- A domain requires specific operational knowledge (file locations, architecture, testing procedures)
+- Multiple sessions have been spent on the same project/domain and patterns have stabilized
+- The knowledge is **operational** (how to do something) rather than **declarative** (a fact to remember)
+
+Do NOT create a runbook for:
+- One-time tasks or projects
+- Knowledge that's better served by a critical memory (mistake-avoidance guardrails)
+- Speculative knowledge from a single session — wait for repetition to confirm patterns
+
+## Runbook File Format
+
+Runbooks use Markdown with extended YAML frontmatter:
+
+```yaml
+---
+date: 2026-02-25
+updated: 2026-02-25
+domain: project-name
+topics: [tag1, tag2]
+type: runbook
+confidence: low|medium|high
+triggers:
+  positive:
+    repo_signals: ["repo-name"]
+    path_signals: ["path/to/key/file.py"]
+    keyword_signals: ["specific term", "another term"]
+    domain_signals: ["broader context phrase"]
+  negative:
+    - signal: "description of misleading signal"
+      reason: "why this is a false positive"
+      added: 2026-02-25
+corrections:
+  - date: 2026-02-25
+    trigger: "what triggered wrong match"
+    wrong_interpretation: "what was incorrectly assumed"
+    correct_interpretation: "what the correct understanding is"
+    action: "what was changed in the runbook"
+---
+
+# Runbook Title
+
+## Project Locations
+[Table of key paths and components]
+
+## Key Architecture
+[How the system works — the operational knowledge]
+
+## Common Operations
+[Step-by-step procedures for frequent tasks]
+
+## Critical Knowledge
+[Must-know facts specific to this domain]
+```
+
+## Multi-Signal Trigger System
+
+Runbooks are loaded based on **multi-signal context matching**, not single-signal pattern matching. This prevents over-fitting.
+
+### Signal Categories
+
+- **repo_signals**: Repository names that correlate with this domain
+- **path_signals**: File paths that indicate this specific domain (not just related tools)
+- **keyword_signals**: Terms in user messages or task descriptions
+- **domain_signals**: Broader contextual phrases that suggest this domain
+
+### Matching Rules
+
+1. **No single signal is sufficient** — require 2+ positive signals from different categories
+2. **Negative signals are vetoes** — any matching negative signal blocks the runbook
+3. **Check at bootstrap AND mid-session** — context shifts should trigger re-evaluation
+4. **Confidence weighting** — higher confidence runbooks need fewer signals
+
+### Example
+
+A `.app.yml` file (path_signal) alone does NOT trigger the mortar-development runbook because `.app.yml` exists in every mortar-managed project. But `.app.yml` + user mentioning "bricklayer" (keyword_signal) + being in the mortar repo (repo_signal) = strong match.
+
+## Correction Propagation
+
+When a user corrects a wrong runbook association or inaccurate content:
+
+### 1. Anti-Signals
+
+Add the misleading trigger as a **negative signal** in the runbook's frontmatter. This permanently prevents the same false match.
+
+### 2. Corrections Log
+
+Record the correction in the `corrections` array with:
+- What triggered the wrong match
+- What was incorrectly assumed
+- What the correct interpretation is
+- What action was taken to fix it
+
+### 3. Runbook Splitting
+
+If a correction reveals two genuinely different contexts being conflated, **split the runbook** into two separate files. For example:
+- `mortar-development.md` — working on mortar's source code
+- `mortar-managed-project.md` — working in a project that uses mortar
+
+### 4. Confidence Adjustment
+
+After corrections, reduce the runbook's `confidence` level. It can be re-elevated after the corrected triggers prove reliable across sessions.
+
+## Runbook Lifecycle
+
+```
+Repeated sessions on a domain
+    ↓
+[Patterns stabilized?] → No → Keep using short-term memory
+    ↓ Yes
+Create runbook (confidence: low)
+    ↓
+Use across sessions, refine triggers
+    ↓
+[Corrections needed?] → Yes → Update triggers, add anti-signals
+    ↓ No
+Elevate confidence (medium → high)
+    ↓
+[Domain becomes obsolete?] → Yes → Archive or delete
+    ↓ No
+Maintain with periodic review
+```
+
+## Relationship to Other Memory Types
+
+| Memory Type | What It Stores | When Created | Lifecycle |
+|-------------|---------------|--------------|-----------|
+| Short-term | Facts, events, decisions | Single interaction | 1-90 days |
+| Long-term | Foundational knowledge | After repeated relevance | Permanent |
+| Critical | Mistake-avoidance guardrails | After costly mistakes | Until obsolete |
+| **Procedural** | **Operational workflows** | **After repeated sessions** | **Until domain changes** |
+
+Procedural memory complements but does not replace other types:
+- A **critical memory** says "never modify test projects directly" (guardrail)
+- A **procedural memory** says "here's how the mortar test pipeline works and where everything lives" (operational knowledge)

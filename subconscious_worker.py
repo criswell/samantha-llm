@@ -50,6 +50,19 @@ try:
 except Exception:
     HAS_ANALYZER = False
 
+# Import Anthropic API analyzer if available
+try:
+    anthropic_analyzer_path = Path(__file__).parent / 'anthropic_analyzer.py'
+    if anthropic_analyzer_path.exists():
+        spec = importlib.util.spec_from_file_location("anthropic_analyzer", anthropic_analyzer_path)
+        anthropic_analyzer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(anthropic_analyzer)
+        HAS_ANTHROPIC_ANALYZER = True
+    else:
+        HAS_ANTHROPIC_ANALYZER = False
+except Exception:
+    HAS_ANTHROPIC_ANALYZER = False
+
 # Import conversation chunker if available
 try:
     chunker_path = Path(__file__).parent / 'conversation_chunker.py'
@@ -63,6 +76,29 @@ try:
 except Exception:
     HAS_CHUNKER = False
 
+# Import procedural extractor if available
+try:
+    extractor_path = Path(__file__).parent / 'procedural_extractor.py'
+    if extractor_path.exists():
+        spec = importlib.util.spec_from_file_location("procedural_extractor", extractor_path)
+        procedural_extractor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(procedural_extractor)
+        HAS_PROCEDURAL = True
+    else:
+        HAS_PROCEDURAL = False
+except Exception:
+    HAS_PROCEDURAL = False
+
+
+def get_best_analyzer():
+    """Select the best available analyzer with fallback logic."""
+    if HAS_ANTHROPIC_ANALYZER:
+        return anthropic_analyzer
+    elif HAS_ANALYZER:
+        return claude_analyzer
+    else:
+        return None
+
 
 def log(log_file: Path, message: str):
     """Write to processing log."""
@@ -70,6 +106,45 @@ def log(log_file: Path, message: str):
         timestamp = datetime.now().isoformat()
         f.write(f"{timestamp} {message}\n")
         f.flush()
+
+
+def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, agent: str = 'claude'):
+    """
+    Create the best available analyzer with fallback logic.
+
+    Priority:
+    1. Anthropic API (preferred - most reliable)
+    2. Claude CLI (fallback)
+    3. Fail with helpful error if neither available
+
+    Args:
+        prompt_path: Path to analysis prompt
+        output_dir: Optional directory for raw output
+        agent: Agent name from session metadata (informational only)
+
+    Returns:
+        Configured analyzer instance
+
+    Raises:
+        RuntimeError: If no analyzer is available
+    """
+    import os
+
+    # Try Anthropic API first (preferred - most reliable)
+    if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
+        return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # Fall back to Claude CLI
+    if HAS_ANALYZER:
+        return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # No analyzer available
+    raise RuntimeError(
+        "No LLM analyzer available. Options:\n"
+        "1. Set ANTHROPIC_API_KEY environment variable to use Anthropic API\n"
+        "2. Install Claude CLI (claude command) and ensure it's in PATH\n"
+        "3. Install anthropic package: pip install anthropic"
+    )
 
 
 def load_transcript(filepath: Path) -> list:
@@ -161,7 +236,8 @@ def _analyze_with_chunking(
     analyses_dir: Path,
     parsed_dir: Path,
     log_func,
-    workspace: Optional['SessionWorkspace'] = None
+    workspace: Optional['SessionWorkspace'] = None,
+    agent: str = 'claude'
 ):
     """
     Analyze long conversation using chunking with context passing.
@@ -174,6 +250,7 @@ def _analyze_with_chunking(
         parsed_dir: Directory for parsed text
         log_func: Logging function to call
         workspace: Optional SessionWorkspace for manifest tracking
+        agent: Agent name from session metadata
 
     Returns:
         Combined AnalysisResult from all chunks
@@ -189,7 +266,7 @@ def _analyze_with_chunking(
         workspace.init_chunk_manifest(len(chunks))
 
     # Create analyzer with output_dir to save raw LLM output for each chunk
-    analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
+    analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir, agent=agent)
 
     # Process each chunk with context from previous chunks
     chunk_results = []
@@ -384,15 +461,17 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
             analyses_dir = recordings_dir.parent / 'analyses'
             analyses_dir.mkdir(exist_ok=True)
 
-        # Get conversation text
+        # Get conversation text and agent info
         session_id = terminal_data.get('metadata', {}).get('session_id', 'unknown')
+        agent = terminal_data.get('metadata', {}).get('agent', 'claude')
         conversation_text = terminal_data['raw_text']
         text_size = len(conversation_text)
 
         log_func(f"[LLM] Conversation size: {text_size:,} characters")
+        log_func(f"[LLM] Session agent: {agent}")
 
         # Check if chunking is needed
-        CHUNK_THRESHOLD = 150000  # ~200K tokens with prompt
+        CHUNK_THRESHOLD = 150000
         needs_chunking = text_size > CHUNK_THRESHOLD and HAS_CHUNKER
 
         if needs_chunking:
@@ -404,7 +483,8 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
                 analyses_dir,
                 parsed_dir,
                 log_func,
-                workspace
+                workspace,
+                agent
             )
         else:
             # Single-pass analysis (original behavior)
@@ -415,7 +495,7 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
             parsed_file.write_text(conversation_text)
 
             # Create analyzer and run analysis
-            analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=analyses_dir)
+            analyzer = create_best_analyzer(prompt_path, output_dir=analyses_dir, agent=agent)
             result = analyzer.analyze(parsed_file)
 
             log_func(f"[LLM] Analysis complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions, {len(result.todos)} TODOs")
@@ -746,6 +826,37 @@ def main():
                 log_func(f"[LLM] Found {len(llm_analysis.get('patterns', []))} patterns, {len(llm_analysis.get('decisions', []))} decisions")
             else:
                 log_func("[LLM] Analysis not available, falling back to basic processing")
+
+        # Phase 3.5: Procedural memory extraction
+        if llm_analysis and HAS_PROCEDURAL and workspace:
+            try:
+                procedural_prompt = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'prompts' / 'procedural-analysis-prompt.txt'
+
+                # Find the full analysis file (contains detailed Part 1 + Part 2)
+                if workspace:
+                    analyses_dir = workspace.analyses_dir
+                else:
+                    analyses_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'analyses'
+
+                analysis_file = analyses_dir / f'analysis_{session_id}_full.md'
+                if not analysis_file.exists():
+                    # Single-pass sessions don't have _full suffix
+                    analysis_file = analyses_dir / f'analysis_{session_id}.md'
+
+                if analysis_file.exists() and procedural_prompt.exists():
+                    log_func("[PROCEDURAL] Starting procedural pattern extraction...")
+                    procedural_extractor.extract_procedural_patterns(
+                        analysis_file=analysis_file,
+                        prompt_path=procedural_prompt,
+                        output_dir=workspace.procedural_dir,
+                        session_id=session_id,
+                        log_func=log_func
+                    )
+                else:
+                    log_func("[PROCEDURAL] Skipping - analysis file or prompt not found")
+            except Exception as e:
+                # Non-fatal — procedural extraction failure shouldn't block the pipeline
+                log_func(f"[PROCEDURAL] Extraction failed (non-fatal): {e}")
 
         # Phase 4: Memory creation (if LLM analysis available)
         memory_file = None

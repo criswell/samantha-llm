@@ -32,6 +32,55 @@ try:
 except Exception:
     HAS_ANALYZER = False
 
+# Import Anthropic API analyzer
+try:
+    anthropic_analyzer_path = Path(__file__).parent / 'anthropic_analyzer.py'
+    spec = importlib.util.spec_from_file_location("anthropic_analyzer", anthropic_analyzer_path)
+    anthropic_analyzer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(anthropic_analyzer)
+    HAS_ANTHROPIC_ANALYZER = True
+except Exception:
+    HAS_ANTHROPIC_ANALYZER = False
+
+
+def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, agent: str = 'claude'):
+    """
+    Create the best available analyzer with fallback logic.
+
+    Priority:
+    1. Anthropic API (preferred - most reliable)
+    2. Claude CLI (fallback)
+    3. Fail with helpful error if neither available
+
+    Args:
+        prompt_path: Path to analysis prompt
+        output_dir: Optional directory for raw output
+        agent: Agent name from session metadata (informational only)
+
+    Returns:
+        Configured analyzer instance
+
+    Raises:
+        RuntimeError: If no analyzer is available
+    """
+    import os
+
+    # Try Anthropic API first (preferred - most reliable)
+    if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
+        return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # Fall back to Claude CLI
+    if HAS_ANALYZER:
+        return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
+
+    # No analyzer available
+    raise RuntimeError(
+        "No LLM analyzer available. Options:\n"
+        "1. Set ANTHROPIC_API_KEY environment variable to use Anthropic API\n"
+        "2. Install Claude CLI (claude command) and ensure it's in PATH\n"
+        "3. Install anthropic package: pip install anthropic"
+    )
+
 
 def get_failed_chunks(workspace: SessionWorkspace) -> list:
     """
@@ -64,7 +113,8 @@ def retry_chunk(
     workspace: SessionWorkspace,
     chunk_num: int,
     chunk_data: dict,
-    prompt_path: Path
+    prompt_path: Path,
+    agent: str = 'claude'
 ) -> bool:
     """
     Retry analyzing a failed chunk.
@@ -74,6 +124,7 @@ def retry_chunk(
         chunk_num: Chunk number to retry
         chunk_data: Chunk metadata from manifest
         prompt_path: Path to analysis prompt
+        agent: Agent name from session metadata
 
     Returns:
         True if successful, False otherwise
@@ -83,6 +134,13 @@ def retry_chunk(
     # Check if parsed chunk file exists
     session_id = workspace.session_id
     chunk_file = workspace.parsed_dir / f'parsed_{session_id}_chunk{chunk_num}.txt'
+
+    # Fallback: check for 'unknown' session ID (legacy bug in original processing)
+    if not chunk_file.exists():
+        chunk_file_unknown = workspace.parsed_dir / f'parsed_unknown_chunk{chunk_num}.txt'
+        if chunk_file_unknown.exists():
+            chunk_file = chunk_file_unknown
+            workspace.log(f"[RETRY] Using legacy chunk file: {chunk_file.name}")
 
     if not chunk_file.exists():
         workspace.log(f"[RETRY] ERROR: Chunk file not found: {chunk_file}")
@@ -96,7 +154,7 @@ def retry_chunk(
 
     try:
         # Analyze chunk
-        analyzer = claude_analyzer.create_analyzer(prompt_path, output_dir=workspace.analyses_dir)
+        analyzer = create_best_analyzer(prompt_path, output_dir=workspace.analyses_dir, agent=agent)
         result = analyzer.analyze(chunk_file)
 
         workspace.log(f"[RETRY] Chunk {chunk_num} complete: {len(result.patterns)} patterns, {len(result.decisions)} decisions")
@@ -133,6 +191,9 @@ def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
         cerebrum_path: Path to cerebrum root
         max_retries: Maximum retry attempts per chunk
     """
+    import json
+    import glob
+
     workspace = SessionWorkspace(session_id, cerebrum_path)
 
     # Check if session exists
@@ -147,6 +208,26 @@ def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
     if not prompt_path.exists():
         print(f"ERROR: Analysis prompt not found: {prompt_path}")
         return
+
+    # Extract agent from processed transcript
+    agent = 'claude'
+    processed_transcript = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'processed' / f'transcript_{session_id}_*.jsonl'
+
+    # Find the actual transcript file (glob pattern)
+    transcript_files = list(glob.glob(str(processed_transcript)))
+    if transcript_files:
+        try:
+            with open(transcript_files[0], 'r') as f:
+                first_line = f.readline()
+                if first_line.strip():
+                    event = json.loads(first_line)
+                    if event.get('type') == 'session_start':
+                        agent = event.get('metadata', {}).get('agent', 'claude')
+                        workspace.log(f"[RETRY] Detected session agent: {agent}")
+        except Exception as e:
+            workspace.log(f"[RETRY] Warning: Could not detect agent from transcript: {e}")
+
+    print(f"Session agent: {agent}")
 
     # Get failed chunks
     failed_chunks = get_failed_chunks(workspace)
@@ -173,7 +254,7 @@ def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
 
         print(f"  Chunk {chunk_num}: ", end='', flush=True)
 
-        success = retry_chunk(workspace, chunk_num, chunk_data, prompt_path)
+        success = retry_chunk(workspace, chunk_num, chunk_data, prompt_path, agent)
 
         if success:
             print("✓ Success")

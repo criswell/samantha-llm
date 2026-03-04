@@ -24,6 +24,7 @@ class SessionWorkspace:
             ├── memories/            # Session-specific memories
             ├── analyses/            # Raw LLM output
             ├── parsed/              # Parsed conversation chunks
+            ├── procedural/          # Procedural memory observations
             └── processing.log       # Session-specific log
     """
 
@@ -45,6 +46,7 @@ class SessionWorkspace:
         self.analyses_dir = self.root / 'analyses'
         self.parsed_dir = self.root / 'parsed'
         self.memories_dir = self.root / 'memories'
+        self.procedural_dir = self.root / 'procedural'
 
         # Files
         self.status_file = self.root / 'status.json'
@@ -58,6 +60,7 @@ class SessionWorkspace:
         self.analyses_dir.mkdir(exist_ok=True)
         self.parsed_dir.mkdir(exist_ok=True)
         self.memories_dir.mkdir(exist_ok=True)
+        self.procedural_dir.mkdir(exist_ok=True)
 
         # Initialize status
         self.update_status('processing', {
