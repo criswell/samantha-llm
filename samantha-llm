@@ -2026,11 +2026,24 @@ def cmd_start(args):
     # Prepare agent command
     # Parse command string (handle spaces in command)
     import shlex
+    import tempfile
     cmd_parts = shlex.split(agent_command)
-    cmd_parts.append(bootstrap_content)
+
+    # Write bootstrap content to a temp file and pass the path instead of the
+    # raw content.  Passing large strings as command-line arguments fails on
+    # Windows (CreateProcess limit ~8,191 chars) and is fragile everywhere else.
+    bootstrap_temp = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.md', prefix='samantha_bootstrap_',
+        encoding='utf-8', delete=False
+    )
+    try:
+        bootstrap_temp.write(bootstrap_content)
+    finally:
+        bootstrap_temp.close()
+    bootstrap_temp_path = bootstrap_temp.name
+    cmd_parts.append(bootstrap_temp_path)
 
     # Create terminal recording file
-    import tempfile
     recording_file = None
     if has_transcript:
         # Store recording next to transcript for processing
@@ -2124,6 +2137,12 @@ def cmd_start(args):
         except Exception as e:
             print_warning(f"Failed to cleanup workspace: {e}")
             print_info("You may need to run 'samantha-llm unlink' manually")
+
+    # Cleanup bootstrap temp file
+    try:
+        os.unlink(bootstrap_temp_path)
+    except OSError:
+        pass
 
     return exit_code
 
