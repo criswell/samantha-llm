@@ -214,7 +214,7 @@ def read_config():
         return None
 
     try:
-        with open(config_file, 'r') as f:
+        with open(config_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
         print_error(f"Failed to read config: {e}")
@@ -230,7 +230,7 @@ def write_config(config):
     config_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        with open(config_file, 'w') as f:
+        with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
         return True
     except Exception as e:
@@ -252,7 +252,7 @@ def migrate_old_config():
     # Parse old config
     try:
         old_config = {}
-        for line in old_config_file.read_text().splitlines():
+        for line in old_config_file.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
                 key, value = line.split('=', 1)
@@ -502,7 +502,7 @@ def generate_bootstrap_prompt(persona_name, config=None):
         return None
 
     try:
-        bootstrap_template = bootstrap_template_path.read_text()
+        bootstrap_template = bootstrap_template_path.read_text(encoding='utf-8')
     except Exception as e:
         print_error(f"Failed to read bootstrap template: {e}")
         return None
@@ -519,7 +519,7 @@ def generate_bootstrap_prompt(persona_name, config=None):
         return None
 
     try:
-        persona_content = persona_path.read_text()
+        persona_content = persona_path.read_text(encoding='utf-8')
     except Exception as e:
         print_error(f"Failed to read persona file: {e}")
         return None
@@ -549,7 +549,7 @@ def ensure_subconscious_prompt():
     # Write prompt if doesn't exist
     if not prompt_path.exists():
         print_info(f"Creating subconscious analysis prompt: {prompt_path}")
-        prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE)
+        prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE, encoding='utf-8')
 
         # Also create README
         readme_path = prompt_path.parent / 'README.md'
@@ -575,7 +575,7 @@ samantha-llm subconscious reset-prompt
 
 This will restore the original prompt template.
 """
-        readme_path.write_text(readme_content)
+        readme_path.write_text(readme_content, encoding='utf-8')
 
     return prompt_path
 
@@ -585,7 +585,7 @@ def reset_subconscious_prompt():
     prompt_path = get_subconscious_prompt_path()
 
     print_info(f"Resetting subconscious analysis prompt to default")
-    prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE)
+    prompt_path.write_text(ANALYSIS_PROMPT_TEMPLATE, encoding='utf-8')
     print_success(f"Prompt reset: {prompt_path}")
 
 
@@ -634,7 +634,7 @@ def install_windows():
     # Create batch wrapper
     print_info(f"Creating batch wrapper: {install_path}")
     wrapper_content = f'@echo off\npython "{script_target}" %*\n'
-    install_path.write_text(wrapper_content)
+    install_path.write_text(wrapper_content, encoding='utf-8')
 
     # Add to PATH
     if not check_path():
@@ -1019,7 +1019,7 @@ def cmd_subconscious(args):
             for sid in target_sessions:
                 status_file = sessions_dir / sid / 'status.json'
                 if status_file.exists():
-                    with open(status_file) as f:
+                    with open(status_file, encoding='utf-8') as f:
                         status = json.load(f)
 
                     # Check if LLM analysis failed (0 patterns and 0 decisions)
@@ -1070,7 +1070,7 @@ def cmd_subconscious(args):
 
                     if result.returncode == 0:
                         # Check if it succeeded
-                        with open(status_file) as f:
+                        with open(status_file, encoding='utf-8') as f:
                             new_status = json.load(f)
 
                         patterns = new_status.get('patterns_count', 0)
@@ -1201,7 +1201,7 @@ def cmd_subconscious(args):
         print("Subconscious Guidance:")
         print("=" * 50)
         print()
-        with open(guidance_file) as f:
+        with open(guidance_file, encoding='utf-8') as f:
             print(f.read())
         return 0
 
@@ -2312,7 +2312,7 @@ def install_qmd():
         "bin_path": qmd_bin
     }
 
-    with open(config_file, 'w') as f:
+    with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(qmd_config, f, indent=2)
 
     print_success(f"Created qmd config: {config_file}")
