@@ -1568,7 +1568,7 @@ def cmd_setup(args):
             print_error("Agent name cannot be empty")
             return 1
 
-        command = input("Enter command to run agent (e.g., 'npx myagent'): ").strip()
+        command = input("Enter command to run agent (e.g., 'claude' or 'myagent'): ").strip()
         if not command:
             print_error("Command cannot be empty")
             return 1

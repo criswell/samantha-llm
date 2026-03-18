@@ -117,9 +117,23 @@ Then restart your shell or run `source ~/.bashrc` (or `~/.zshrc`).
 
 After completing the installation above, follow these steps to use Samantha in your projects.
 
-You will need some sort of agentic LLM tool. The specifics of using this
-repository will depend upon what tool you are using. I will include instructions
-for using [Abacus.ai](https://abacus.ai/)'s CLI tool as an example.
+You will need an agentic LLM tool. The recommended tool is [Claude Code](https://claude.ai/code) by Anthropic.
+
+### Install Claude Code
+
+**macOS/Linux:**
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://claude.ai/install.ps1 | iex
+```
+
+**Note:** The `npx` installation method is deprecated. Use the native installer above.
+
+### Configure and Start
 
 1. **Symlink the repository to your workspace**:
 
@@ -142,8 +156,17 @@ for using [Abacus.ai](https://abacus.ai/)'s CLI tool as an example.
    file in this repository. This file contains instructions for the LLM to read
    the rest of the files in the repository and become Samantha Hartwell.
 
-   Using Abacus.ai's CLI tool, you would run something like:
+   **Using Claude Code (recommended):**
+   ```bash
+   claude "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
+   ```
 
+   **Or use the samantha-llm CLI:**
+   ```bash
+   samantha-llm start
+   ```
+
+   **Alternative agents (e.g., Abacus.ai):**
    ```bash
    npx abacusai "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
    ```
