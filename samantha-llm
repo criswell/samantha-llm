@@ -1931,6 +1931,96 @@ try {{
             return 1
 
 
+def run_agent_with_recording_shell(
+    shell_cmd: str,
+    cwd: Path,
+    recording_file: Path,
+    system: str
+) -> int:
+    """
+    Run agent shell command with terminal recording.
+
+    Like run_agent_with_recording but accepts a pre-built shell command string
+    (needed for shell-level file expansion to avoid command-line length limits).
+
+    Args:
+        shell_cmd: Shell command string (Unix sh or Windows PowerShell syntax)
+        cwd: Working directory
+        recording_file: Path to save terminal recording
+        system: Platform name ('windows', 'linux', 'darwin')
+
+    Returns:
+        Exit code from agent
+    """
+    if system == 'windows':
+        # Windows: Wrap in PowerShell with Start-Transcript
+        ps_command = f"""
+Start-Transcript -Path '{recording_file}' -Force
+try {{
+    {shell_cmd}
+    exit $LASTEXITCODE
+}} finally {{
+    Stop-Transcript
+}}
+"""
+        cmd = ['powershell', '-NoProfile', '-Command', ps_command]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            return result.returncode
+        except Exception as e:
+            print_error(f"Failed to execute agent with recording: {e}")
+            return 1
+
+    else:
+        # Unix/Mac: Use 'script' command with shell command string
+        cmd = [
+            'script',
+            '-q',
+            '-c',
+            shell_cmd,
+            str(recording_file)
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=str(cwd)
+            )
+            return result.returncode
+        except FileNotFoundError:
+            print_error("'script' command not found")
+            print_info("Terminal recording requires 'script' (usually in util-linux package)")
+            print_info("Falling back to execution without recording...")
+
+            # Fallback: run without recording
+            try:
+                result = subprocess.run(
+                    shell_cmd,
+                    shell=True,
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                    cwd=str(cwd)
+                )
+                return result.returncode
+            except Exception as e:
+                print_error(f"Failed to execute agent: {e}")
+                return 1
+        except Exception as e:
+            print_error(f"Failed to execute agent with recording: {e}")
+            return 1
+
+
 # ============================================================================
 # Session Commands
 # ============================================================================
@@ -2039,12 +2129,6 @@ def cmd_start(args):
         print_error(f"Failed to generate bootstrap prompt for persona: {persona_name}")
         return 1
 
-    try:
-        pass  # bootstrap_content already generated above
-    except Exception as e:
-        print_error(f"Failed to read bootstrap file: {e}")
-        return 1
-
     # Set up transcript capture
     try:
         # Import transcript capture module
@@ -2068,14 +2152,13 @@ def cmd_start(args):
         transcript = None
 
     # Prepare agent command
-    # Parse command string (handle spaces in command)
     import shlex
     import tempfile
-    cmd_parts = shlex.split(agent_command)
 
-    # Write bootstrap content to a temp file and pass the path instead of the
-    # raw content.  Passing large strings as command-line arguments fails on
-    # Windows (CreateProcess limit ~8,191 chars) and is fragile everywhere else.
+    # Write bootstrap content to a temp file.  The shell reads the file and
+    # passes its contents as the agent's prompt argument.  This avoids
+    # command-line length limits (Windows cmd.exe ~8,191 chars, CreateProcess
+    # ~32,767 chars) and is more robust than embedding large strings directly.
     bootstrap_temp = tempfile.NamedTemporaryFile(
         mode='w', suffix='.md', prefix='samantha_bootstrap_',
         encoding='utf-8', delete=False
@@ -2085,7 +2168,6 @@ def cmd_start(args):
     finally:
         bootstrap_temp.close()
     bootstrap_temp_path = bootstrap_temp.name
-    cmd_parts.append(bootstrap_temp_path)
 
     # Create terminal recording file
     recording_file = None
@@ -2106,19 +2188,44 @@ def cmd_start(args):
     # Record session start time
     session_start_time = time.time()
 
+    # Build the shell command that reads bootstrap from the temp file.
+    # The file content is expanded inside the shell process so it never
+    # hits OS command-line length limits (8K on Windows cmd.exe).
+    system = get_platform()
+    if system == 'windows':
+        escaped_path = bootstrap_temp_path.replace("'", "''")
+        agent_cmd_str = agent_command.replace("'", "''")
+        shell_cmd = f"& {agent_cmd_str} (Get-Content -Raw '{escaped_path}')"
+    else:
+        escaped_path = shlex.quote(bootstrap_temp_path)
+        shell_cmd = f"{agent_command} \"$(cat {escaped_path})\""
+
     # Execute agent command with terminal recording
     if recording_file:
-        exit_code = run_agent_with_recording(cmd_parts, cwd, recording_file)
+        exit_code = run_agent_with_recording_shell(
+            shell_cmd, cwd, recording_file, system
+        )
     else:
         # Fallback: run without recording
         try:
-            result = subprocess.run(
-                cmd_parts,
-                stdin=sys.stdin,
-                stdout=sys.stdout,
-                stderr=sys.stderr,
-                cwd=str(cwd)
-            )
+            if system == 'windows':
+                cmd = ['powershell', '-NoProfile', '-Command', shell_cmd]
+                result = subprocess.run(
+                    cmd,
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                    cwd=str(cwd)
+                )
+            else:
+                result = subprocess.run(
+                    shell_cmd,
+                    shell=True,
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
+                    cwd=str(cwd)
+                )
             exit_code = result.returncode
         except FileNotFoundError:
             print_error(f"Agent command not found: {agent_command}")
