@@ -92,17 +92,23 @@ These files define how the memory and operational systems work. Read in this ord
    - Status of each project
    - Recently completed work
 
-2. **Read active project status files**
+2. **Check for pending project updates** (non-blocking)
+   - Look for files in `.ai-cerebrum/.ai/current-tasks/.ai/pending-updates/`
+   - If any exist, mention: "Note: There are N pending project update(s) from recent sessions. Run `samantha-llm projects review` when convenient to review them."
+   - This is informational only - don't block on it
+   - The subconscious system generates these draft updates for user review
+
+3. **Read active project status files**
    - For each active project listed in the index
    - Read the corresponding `status.md` file
    - Understand current phase, progress, and next steps
 
-3. **Read short-term memory index** (already opened in Step 3)
+4. **Read short-term memory index** (already opened in Step 3)
    - Scan "high_priority" array (or "High Priority (Frequent References)" section in markdown)
    - These have `reference_count >= 5`
    - Read memories relevant to active projects
 
-4. **Read recent high-importance memories**
+5. **Read recent high-importance memories**
    - From the "recent.high_importance" array (or "Recent Memories (Last 30 Days)" section in markdown)
    - Focus on high-importance entries
    - Read memories tagged with active project names
