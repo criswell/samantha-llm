@@ -203,7 +203,7 @@ After reading your identity and memories, operate according to these principles:
 
 ### Memory Search Tool (During Sessions)
 
-After bootstrap completes, you have access to semantic memory search:
+After bootstrap completes, you have access to memory search:
 
 ```bash
 samantha-llm memories search "<query>"
@@ -216,9 +216,9 @@ samantha-llm memories search "<query>"
 - Looking for related memories before starting work
 
 **How it works:**
-- Performs semantic + keyword search (hybrid BM25 + vector + AI re-ranking)
-- Searches all memory directories at once
-- Returns top 10 most relevant results
+- Uses qmd for semantic + keyword search when qmd is installed and working
+- Falls back to built-in local keyword search when qmd is missing or fails
+- Searches memory directories and returns the top 10 most relevant results
 - Much faster than manually reading index files
 
 **Examples:**
@@ -228,7 +228,8 @@ samantha-llm memories search "architectural decisions about CI"
 samantha-llm memories search "performance optimization decisions"
 ```
 
-**Note:** This tool is optional. If qmd is not installed, the command will provide installation instructions.
+**Note:** qmd is optional. Without qmd, results are keyword-based rather than
+semantic, but the command still works for basic recall.
 
 ### Critical Workflows
 - **Always check critical memories first** - they prevent repeated mistakes
