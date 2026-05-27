@@ -39,6 +39,8 @@ Samantha includes an automated memory creation system that runs after each sessi
 
 **No manual intervention needed** - the system works transparently in the background, preserving important context across sessions.
 
+Subconscious analysis can use Anthropic, Claude CLI, or Codex CLI. Set `SAMANTHA_ANALYZER=codex` to force Codex for analysis.
+
 ### Semantic Memory Search
 
 Powered by QMD (Query My Docs), Samantha can semantically search her memories:
@@ -117,7 +119,7 @@ Then restart your shell or run `source ~/.bashrc` (or `~/.zshrc`).
 
 After completing the installation above, follow these steps to use Samantha in your projects.
 
-You will need an agentic LLM tool. The recommended tool is [Claude Code](https://claude.ai/code) by Anthropic.
+You will need an agentic LLM tool. The recommended tool is [Claude Code](https://claude.ai/code) by Anthropic. OpenAI Codex is also supported.
 
 ### Install Claude Code
 
@@ -132,6 +134,10 @@ irm https://claude.ai/install.ps1 | iex
 ```
 
 **Note:** The `npx` installation method is deprecated. Use the native installer above.
+
+### Install OpenAI Codex
+
+Install and authenticate the Codex CLI using OpenAI's current Codex instructions, then confirm `codex --version` works in your shell.
 
 ### Configure and Start
 
@@ -159,6 +165,11 @@ irm https://claude.ai/install.ps1 | iex
    **Using Claude Code (recommended):**
    ```bash
    claude "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
+   ```
+
+   **Using OpenAI Codex:**
+   ```bash
+   codex --no-alt-screen "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
    ```
 
    **Or use the samantha-llm CLI:**
