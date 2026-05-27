@@ -22,35 +22,22 @@ except ImportError:
     print("ERROR: session_workspace module not found")
     sys.exit(1)
 
-# Import analyzer
+# Import analyzer factory
 try:
-    analyzer_path = Path(__file__).parent / 'claude_analyzer.py'
-    spec = importlib.util.spec_from_file_location("claude_analyzer", analyzer_path)
-    claude_analyzer = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(claude_analyzer)
+    analyzer_factory_path = Path(__file__).parent / 'analyzer_factory.py'
+    spec = importlib.util.spec_from_file_location("analyzer_factory", analyzer_factory_path)
+    analyzer_factory = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(analyzer_factory)
     HAS_ANALYZER = True
 except Exception:
     HAS_ANALYZER = False
-
-# Import Anthropic API analyzer
-try:
-    anthropic_analyzer_path = Path(__file__).parent / 'anthropic_analyzer.py'
-    spec = importlib.util.spec_from_file_location("anthropic_analyzer", anthropic_analyzer_path)
-    anthropic_analyzer = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(anthropic_analyzer)
-    HAS_ANTHROPIC_ANALYZER = True
-except Exception:
-    HAS_ANTHROPIC_ANALYZER = False
 
 
 def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, agent: str = 'claude'):
     """
     Create the best available analyzer with fallback logic.
 
-    Priority:
-    1. Anthropic API (preferred - most reliable)
-    2. Claude CLI (fallback)
-    3. Fail with helpful error if neither available
+    Priority is managed by analyzer_factory.
 
     Args:
         prompt_path: Path to analysis prompt
@@ -63,22 +50,13 @@ def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, a
     Raises:
         RuntimeError: If no analyzer is available
     """
-    import os
+    if not HAS_ANALYZER:
+        raise RuntimeError("Analyzer factory is not available")
 
-    # Try Anthropic API first (preferred - most reliable)
-    if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
-        return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
-
-    # Fall back to Claude CLI
-    if HAS_ANALYZER:
-        return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
-
-    # No analyzer available
-    raise RuntimeError(
-        "No LLM analyzer available. Options:\n"
-        "1. Set ANTHROPIC_API_KEY environment variable to use Anthropic API\n"
-        "2. Install Claude CLI (claude command) and ensure it's in PATH\n"
-        "3. Install anthropic package: pip install anthropic"
+    return analyzer_factory.create_best_analyzer(
+        prompt_path,
+        output_dir=output_dir,
+        agent=agent
     )
 
 
@@ -298,7 +276,7 @@ def main():
     cerebrum_path = Path(sys.argv[2])
 
     if not HAS_ANALYZER:
-        print("ERROR: Claude analyzer not available")
+        print("ERROR: Analyzer factory not available")
         sys.exit(1)
 
     retry_session(session_id, cerebrum_path)

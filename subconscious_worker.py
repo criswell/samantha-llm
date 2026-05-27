@@ -12,6 +12,7 @@ Usage:
 import sys
 import json
 import time
+import importlib.util
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -25,7 +26,6 @@ except ImportError:
 
 # Import terminal parser if available
 try:
-    import importlib.util
     parser_path = Path(__file__).parent / 'terminal_parser.py'
     if parser_path.exists():
         spec = importlib.util.spec_from_file_location("terminal_parser", parser_path)
@@ -37,31 +37,18 @@ try:
 except Exception:
     HAS_PARSER = False
 
-# Import conversation analyzer if available
+# Import analyzer factory if available
 try:
-    analyzer_path = Path(__file__).parent / 'claude_analyzer.py'
-    if analyzer_path.exists():
-        spec = importlib.util.spec_from_file_location("claude_analyzer", analyzer_path)
-        claude_analyzer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(claude_analyzer)
+    analyzer_factory_path = Path(__file__).parent / 'analyzer_factory.py'
+    if analyzer_factory_path.exists():
+        spec = importlib.util.spec_from_file_location("analyzer_factory", analyzer_factory_path)
+        analyzer_factory = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(analyzer_factory)
         HAS_ANALYZER = True
     else:
         HAS_ANALYZER = False
 except Exception:
     HAS_ANALYZER = False
-
-# Import Anthropic API analyzer if available
-try:
-    anthropic_analyzer_path = Path(__file__).parent / 'anthropic_analyzer.py'
-    if anthropic_analyzer_path.exists():
-        spec = importlib.util.spec_from_file_location("anthropic_analyzer", anthropic_analyzer_path)
-        anthropic_analyzer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(anthropic_analyzer)
-        HAS_ANTHROPIC_ANALYZER = True
-    else:
-        HAS_ANTHROPIC_ANALYZER = False
-except Exception:
-    HAS_ANTHROPIC_ANALYZER = False
 
 # Import conversation chunker if available
 try:
@@ -103,16 +90,6 @@ except Exception:
     HAS_PROJECT_ANALYZER = False
 
 
-def get_best_analyzer():
-    """Select the best available analyzer with fallback logic."""
-    if HAS_ANTHROPIC_ANALYZER:
-        return anthropic_analyzer
-    elif HAS_ANALYZER:
-        return claude_analyzer
-    else:
-        return None
-
-
 def log(log_file: Path, message: str):
     """Write to processing log."""
     with open(log_file, 'a') as f:
@@ -125,10 +102,7 @@ def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, a
     """
     Create the best available analyzer with fallback logic.
 
-    Priority:
-    1. Anthropic API (preferred - most reliable)
-    2. Claude CLI (fallback)
-    3. Fail with helpful error if neither available
+    Priority is managed by analyzer_factory.
 
     Args:
         prompt_path: Path to analysis prompt
@@ -141,22 +115,13 @@ def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, a
     Raises:
         RuntimeError: If no analyzer is available
     """
-    import os
+    if not HAS_ANALYZER:
+        raise RuntimeError("Analyzer factory is not available")
 
-    # Try Anthropic API first (preferred - most reliable)
-    if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
-        return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
-
-    # Fall back to Claude CLI
-    if HAS_ANALYZER:
-        return claude_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
-
-    # No analyzer available
-    raise RuntimeError(
-        "No LLM analyzer available. Options:\n"
-        "1. Set ANTHROPIC_API_KEY environment variable to use Anthropic API\n"
-        "2. Install Claude CLI (claude command) and ensure it's in PATH\n"
-        "3. Install anthropic package: pip install anthropic"
+    return analyzer_factory.create_best_analyzer(
+        prompt_path,
+        output_dir=output_dir,
+        agent=agent
     )
 
 

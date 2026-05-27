@@ -69,7 +69,7 @@ samantha-llm setup
 ```
 
 Prompts for:
-- Agent name (e.g., "claude", "copilot")
+- Agent name (e.g., "claude", "codex", "copilot")
 - Command to run agent
 - Optional bootstrap file
 
@@ -80,6 +80,7 @@ samantha-llm setup --default AGENT
 
 Supported agents:
 - **Claude Code** - Anthropic's official CLI
+- **OpenAI Codex** - OpenAI's coding agent CLI
 - **GitHub Copilot** - Microsoft's AI pair programmer
 - **Abacus.ai** - Abacus platform CLI
 - **Custom** - Any command that accepts text input
@@ -141,6 +142,7 @@ samantha-llm start
 **With specific agent:**
 ```bash
 samantha-llm start claude
+samantha-llm start codex
 ```
 
 **What it does:**
@@ -319,6 +321,24 @@ No special integration needed - works like any CLI tool (git, grep, etc.)
 
 ---
 
+## Subconscious Analyzer Selection
+
+After a recorded session, subconscious processing selects an analyzer automatically:
+
+- `ANTHROPIC_API_KEY` set: use Anthropic API
+- Codex session: use Codex CLI when available
+- Otherwise: use Claude CLI, then Codex CLI as fallback
+
+Override selection with:
+
+```bash
+export SAMANTHA_ANALYZER=codex
+```
+
+Supported values: `auto`, `anthropic`, `claude`, `codex`.
+
+---
+
 ## Configuration Files
 
 **Main config:** `~/.config/samantha-llm/config.json`
@@ -328,7 +348,11 @@ No special integration needed - works like any CLI tool (git, grep, etc.)
   "default_agent": "claude",
   "agents": {
     "claude": {
-      "command": "claude --dangerously-add-system-prompt",
+      "command": "claude",
+      "bootstrap_file": "BOOTSTRAP_PROMPT.md"
+    },
+    "codex": {
+      "command": "codex --no-alt-screen",
       "bootstrap_file": "BOOTSTRAP_PROMPT.md"
     }
   },
