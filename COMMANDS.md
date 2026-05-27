@@ -7,7 +7,7 @@ Complete reference for all `samantha-llm` commands.
 - [Installation & Setup](#installation--setup)
 - [Agent Configuration](#agent-configuration)
 - [Workspace Management](#workspace-management)
-- [Memory Search (QMD)](#memory-search-qmd)
+- [Memory Search](#memory-search)
 - [Help & Information](#help--information)
 
 ---
@@ -156,9 +156,16 @@ samantha-llm start codex
 
 ---
 
-## Memory Search (QMD)
+## Memory Search
 
-Semantic search across Samantha's memories using [qmd](https://github.com/tobi/qmd).
+Search across Samantha's memories.
+
+By default, `samantha-llm memories search` tries to use
+[qmd](https://github.com/tobi/qmd) for rich hybrid search. If qmd is missing
+or fails, the command automatically falls back to a small built-in keyword
+search over local memory files. The fallback is intentionally basic: it scans
+files at runtime, ranks filename/title/frontmatter/body matches, and requires
+no setup.
 
 ### qmd install
 
@@ -219,7 +226,7 @@ Useful in scripts.
 
 ### memories index
 
-Index cerebrum files for semantic search.
+Index cerebrum files for qmd semantic search.
 
 ```bash
 samantha-llm memories index
@@ -230,6 +237,7 @@ samantha-llm memories index
 - `.ai/long-term-memory/.ai/` - Permanent knowledge
 - `.ai/current-tasks/.ai/` - Active projects
 - `.ai/work-experience/.ai/` - Completed work
+- `.ai/procedural-memory/.ai/` - Operational runbooks
 
 **Creates:** `samantha-cerebrum` collection in qmd
 
@@ -240,9 +248,12 @@ samantha-llm memories index
 
 **Incremental:** Only changed files re-indexed
 
+**Note:** The built-in keyword fallback does not require indexing.
+
 ### memories search
 
-Search memories semantically.
+Search memories. Uses qmd when available; otherwise uses local keyword
+fallback.
 
 ```bash
 samantha-llm memories search <query>
@@ -264,12 +275,20 @@ samantha-llm memories search "how to set up new project"
 - **Hybrid** (default) - Keyword + semantic + AI re-ranking
   - Best results, most accurate
   - Uses all three qmd models
+  - Requires qmd
 
 - **Keyword** (fast) - BM25 full-text search
   - Use qmd directly: `qmd search samantha-cerebrum "query"`
+  - Requires qmd
 
 - **Semantic** (vector) - Embedding similarity
   - Use qmd directly: `qmd vsearch samantha-cerebrum "query"`
+  - Requires qmd
+
+- **Local fallback** - Built-in keyword search
+  - Used automatically when qmd is missing or fails
+  - No installation, index, models, or network access required
+  - Less capable than qmd; intended as a reliability fallback
 
 **Output format:**
 - Markdown (default) - Human-readable with context

@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -2638,7 +2639,134 @@ def get_memory_directories():
         cerebrum / '.ai' / 'long-term-memory' / '.ai',
         cerebrum / '.ai' / 'current-tasks' / '.ai',
         cerebrum / '.ai' / 'work-experience' / '.ai',
+        cerebrum / '.ai' / 'procedural-memory' / '.ai',
     ]
+
+
+def _tokenize_search_text(text):
+    """Tokenize text for the lightweight local memory search fallback."""
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def local_search_memories(query, format_type='markdown', limit=10):
+    """Small dependency-free keyword fallback for memory search."""
+    query_terms = _tokenize_search_text(query)
+    if not query_terms:
+        print_error("Search query must contain at least one word")
+        return False
+
+    cerebrum = get_cerebrum_path()
+    results = []
+
+    for memory_dir in get_memory_directories():
+        if not memory_dir.exists():
+            continue
+        for path in memory_dir.rglob('*.md'):
+            if path.name == 'index.md':
+                continue
+            try:
+                content = path.read_text(encoding='utf-8', errors='replace')
+            except Exception:
+                continue
+
+            frontmatter = ''
+            body = content
+            if content.startswith('---\n'):
+                parts = content.split('---\n', 2)
+                if len(parts) == 3:
+                    frontmatter, body = parts[1], parts[2]
+
+            title = path.stem.replace('_', ' ').replace('-', ' ')
+            for line in body.splitlines():
+                if line.startswith('# '):
+                    title = line[2:].strip()
+                    break
+
+            try:
+                rel_path = path.relative_to(cerebrum)
+            except ValueError:
+                rel_path = path
+
+            fields = {
+                'strong': f"{rel_path} {title}".lower(),
+                'medium': frontmatter.lower(),
+                'weak': body.lower(),
+            }
+            score = 0
+            matched = 0
+            for term in query_terms:
+                term_score = 0
+                if term in fields['strong']:
+                    term_score += 8
+                if term in fields['medium']:
+                    term_score += 4
+                if term in fields['weak']:
+                    term_score += min(fields['weak'].count(term), 4)
+                if term_score:
+                    matched += 1
+                    score += term_score
+
+            if not score:
+                continue
+            score += len(query_terms) * 3 if matched == len(query_terms) else 0
+
+            compact_body = re.sub(r'\s+', ' ', body).strip()
+            hit = min(
+                (
+                    compact_body.lower().find(term)
+                    for term in query_terms
+                    if compact_body.lower().find(term) != -1
+                ),
+                default=0,
+            )
+            start = max(0, hit - 70)
+            snippet = compact_body[start:start + 220].strip()
+            if start:
+                snippet = f"...{snippet}"
+            if start + 220 < len(compact_body):
+                snippet = f"{snippet}..."
+
+            results.append({
+                'path': str(rel_path),
+                'title': title,
+                'score': score,
+                'snippet': snippet,
+            })
+
+    results.sort(key=lambda item: (-item['score'], item['path']))
+    results = results[:limit]
+
+    if not results:
+        print_warning("No results found")
+        print_info(f"Query: {query}")
+        print_info("Mode: local keyword fallback")
+        return True
+
+    if format_type == 'json':
+        print(json.dumps(results, indent=2))
+        return True
+
+    if format_type == 'plain':
+        for result in results:
+            print(f"{result['path']}: {result['title']}")
+            if result['snippet']:
+                print(f"  {result['snippet']}")
+        return True
+
+    print("# Local Memory Search Results")
+    print()
+    print(f"Query: {query}")
+    print("Mode: local keyword fallback")
+    print()
+    for index, result in enumerate(results, start=1):
+        print(f"## {index}. {result['title']}")
+        print(f"- File: `{result['path']}`")
+        print(f"- Score: {result['score']}")
+        if result['snippet']:
+            print(f"- Snippet: {result['snippet']}")
+        print()
+
+    return True
 
 
 def index_cerebrum():
@@ -2737,12 +2865,11 @@ def index_cerebrum():
 
 
 def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filters=None):
-    """Search memories using qmd"""
+    """Search memories using qmd, with a local keyword fallback."""
     qmd_bin = get_qmd_bin_path()
     if not qmd_bin:
-        print_error("qmd is not installed")
-        print_info("Install with: samantha-llm qmd install")
-        return False
+        print_warning("qmd is not installed; using local keyword fallback")
+        return local_search_memories(query, format_type, limit)
 
     collection_name = "samantha-cerebrum"
 
@@ -2775,12 +2902,10 @@ def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filt
         )
 
         if result.returncode != 0:
-            if 'not found' in result.stderr.lower() or 'does not exist' in result.stderr.lower():
-                print_error(f"Collection '{collection_name}' not found")
-                print_info("Index your cerebrum first: samantha-llm memories index")
-            else:
-                print_error(f"Search failed: {result.stderr}")
-            return False
+            print_warning("qmd search failed; using local keyword fallback")
+            if result.stderr.strip():
+                print_info(result.stderr.strip())
+            return local_search_memories(query, format_type, limit)
 
         # Output results
         output = result.stdout.strip()
@@ -2797,8 +2922,9 @@ def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filt
         return True
 
     except Exception as e:
-        print_error(f"Search failed: {e}")
-        return False
+        print_warning(f"qmd search failed: {e}")
+        print_info("Using local keyword fallback")
+        return local_search_memories(query, format_type, limit)
 
 
 def cmd_memories(args):
