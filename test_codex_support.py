@@ -72,6 +72,31 @@ class TestCodexSetup(unittest.TestCase):
         self.assertEqual(saved['agents']['codex']['command'], 'codex --no-alt-screen')
         self.assertEqual(saved['agents']['codex']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
 
+    def test_interactive_setup_adds_qwen3_agent(self):
+        cli = load_cli_module()
+        config = {
+            'version': '0.5.0',
+            'repo_path': '/tmp/samantha-llm',
+            'agents': {},
+            'workspaces': {},
+        }
+        written = []
+
+        def write_config(updated):
+            written.append(copy.deepcopy(updated))
+            return True
+
+        with patch.object(cli, 'read_config', return_value=config), \
+             patch.object(cli, 'write_config', side_effect=write_config), \
+             patch('builtins.input', side_effect=['5']):
+            result = cli.cmd_setup(SimpleNamespace(default_agent=None))
+
+        self.assertEqual(result, 0)
+        saved = written[-1]
+        self.assertEqual(saved['default_agent'], 'qwen3')
+        self.assertEqual(saved['agents']['qwen3']['command'], 'ollama run qwen3-coder:480b-cloud')
+        self.assertEqual(saved['agents']['qwen3']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
+
     def test_setup_default_accepts_codex(self):
         cli = load_cli_module()
         config = {

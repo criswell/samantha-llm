@@ -81,6 +81,7 @@ samantha-llm setup --default AGENT
 Supported agents:
 - **Claude Code** - Anthropic's official CLI
 - **OpenAI Codex** - OpenAI's coding agent CLI
+- **Qwen3-Coder via Ollama** - `ollama run qwen3-coder:480b-cloud`
 - **GitHub Copilot** - Microsoft's AI pair programmer
 - **Abacus.ai** - Abacus platform CLI
 - **Custom** - Any command that accepts text input
@@ -143,6 +144,7 @@ samantha-llm start
 ```bash
 samantha-llm start claude
 samantha-llm start codex
+samantha-llm start qwen3
 ```
 
 **What it does:**

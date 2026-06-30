@@ -1322,10 +1322,11 @@ Description:
     Hartwell LLM memory system. After installation, the samantha-llm command
     will be available system-wide.
 
-    Use 'setup' to configure an agent (Claude Code, OpenAI Codex, Abacus.ai,
-    GitHub Copilot, or custom). Use 'start' to begin a Samantha session in the current
-    workspace - it will automatically link the workspace, run the agent with
-    the bootstrap prompt, and clean up when the session ends.
+    Use 'setup' to configure an agent (Claude Code, OpenAI Codex,
+    Qwen3-Coder via Ollama, Abacus.ai, GitHub Copilot, or custom). Use 'start'
+    to begin a Samantha session in the current workspace - it will
+    automatically link the workspace, run the agent with the bootstrap prompt,
+    and clean up when the session ends.
 
     Use 'link' to manually activate samantha-llm in a project directory, and
     'unlink' to deactivate it. This creates/removes a .ai-cerebrum symlink that
@@ -1351,6 +1352,7 @@ Examples:
     # Start a session with a specific agent
     samantha-llm start claude
     samantha-llm start codex
+    samantha-llm start qwen3
 
     # Link a project directory to samantha-llm (manual)
     cd /path/to/project
@@ -1578,10 +1580,11 @@ def cmd_setup(args):
     print("2) Abacus.ai")
     print("3) GitHub Copilot")
     print("4) OpenAI Codex")
-    print("5) Other (manual setup)")
+    print("5) Qwen3-Coder (Ollama)")
+    print("6) Other (manual setup)")
     print()
 
-    choice = input("Enter your choice [1-5]: ").strip()
+    choice = input("Enter your choice [1-6]: ").strip()
 
     agent_config = None
     agent_name = None
@@ -1615,6 +1618,13 @@ def cmd_setup(args):
         }
         print_info("Configuring OpenAI Codex...")
     elif choice == '5':
+        agent_name = 'qwen3'
+        agent_config = {
+            'command': 'ollama run qwen3-coder:480b-cloud',
+            'bootstrap_file': 'BOOTSTRAP_PROMPT.md'
+        }
+        print_info("Configuring Qwen3-Coder via Ollama...")
+    elif choice == '6':
         print()
         print_info("Manual agent setup")
         agent_name = input("Enter agent name (e.g., 'myagent'): ").strip()

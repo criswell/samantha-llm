@@ -123,7 +123,7 @@ Then restart your shell or run `source ~/.bashrc` (or `~/.zshrc`).
 
 After completing the installation above, follow these steps to use Samantha in your projects.
 
-You will need an agentic LLM tool. The recommended tool is [Claude Code](https://claude.ai/code) by Anthropic. OpenAI Codex is also supported.
+You will need an agentic LLM tool. The recommended tool is [Claude Code](https://claude.ai/code) by Anthropic. OpenAI Codex and Qwen3-Coder via Ollama are also supported.
 
 ### Install Claude Code
 
@@ -142,6 +142,14 @@ irm https://claude.ai/install.ps1 | iex
 ### Install OpenAI Codex
 
 Install and authenticate the Codex CLI using OpenAI's current Codex instructions, then confirm `codex --version` works in your shell.
+
+### Install Qwen3-Coder via Ollama
+
+Install Ollama, then confirm the target model runs:
+
+```bash
+ollama run qwen3-coder:480b-cloud
+```
 
 ### Configure and Start
 
@@ -176,7 +184,16 @@ Install and authenticate the Codex CLI using OpenAI's current Codex instructions
    codex --no-alt-screen "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
    ```
 
-   **Or use the samantha-llm CLI:**
+   **Using Qwen3-Coder via Ollama:**
+   ```bash
+   samantha-llm start qwen3
+   ```
+
+   The CLI generates the full bootstrap prompt by injecting the configured
+   persona into `BOOTSTRAP_PROMPT.md`, then passes it as the trailing prompt
+   argument to `ollama run qwen3-coder:480b-cloud`.
+
+   **Using the default configured agent:**
    ```bash
    samantha-llm start
    ```
