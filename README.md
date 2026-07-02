@@ -145,10 +145,10 @@ Install and authenticate the Codex CLI using OpenAI's current Codex instructions
 
 ### Install Qwen3-Coder via Ollama
 
-Install Ollama, then confirm the target model runs:
+Install Ollama, then install/configure the Qwen Code integration:
 
 ```bash
-ollama run qwen3-coder:480b-cloud
+ollama launch qwen --config --model qwen3-coder:480b-cloud --yes
 ```
 
 ### Configure and Start
@@ -190,8 +190,10 @@ ollama run qwen3-coder:480b-cloud
    ```
 
    The CLI generates the full bootstrap prompt by injecting the configured
-   persona into `BOOTSTRAP_PROMPT.md`, then passes it as the trailing prompt
-   argument to `ollama run qwen3-coder:480b-cloud`.
+   persona into `BOOTSTRAP_PROMPT.md`, then appends it to Qwen Code's system
+   prompt and sends a short `--prompt-interactive` instruction to begin
+   bootstrap. This keeps the agent interactive while making initialization less
+   ambiguous than a long first user prompt.
 
    **Using the default configured agent:**
    ```bash

@@ -25,6 +25,20 @@ FILENAME = os.path.basename(__file__)
 # Version
 VERSION = "0.5.0"
 
+BOOTSTRAP_INPUT_ARGUMENT = "argument"
+BOOTSTRAP_INPUT_QWEN_SYSTEM = "qwen_system"
+VALID_BOOTSTRAP_INPUTS = {
+    BOOTSTRAP_INPUT_ARGUMENT,
+    BOOTSTRAP_INPUT_QWEN_SYSTEM,
+}
+QWEN_BOOTSTRAP_START_PROMPT = (
+    "Begin the Samantha Hartwell bootstrap now. Read "
+    ".ai-cerebrum/core_processes/bootstrap.md and follow the complete "
+    "initialization sequence exactly. Do not infer or start any unrelated "
+    "software implementation task. After bootstrap, summarize context and ask "
+    "how to help."
+)
+
 # Subconscious analysis prompt template
 ANALYSIS_PROMPT_TEMPLATE = """You are analyzing a terminal recording of a conversation between a user and an AI coding assistant (Claude, Codex, Copilot, or Abacus.ai). Your goal is to extract meaningful insights that will help the AI assistant better understand the user's work patterns, preferences, and context in future sessions.
 
@@ -1620,8 +1634,9 @@ def cmd_setup(args):
     elif choice == '5':
         agent_name = 'qwen3'
         agent_config = {
-            'command': 'ollama run qwen3-coder:480b-cloud',
-            'bootstrap_file': 'BOOTSTRAP_PROMPT.md'
+            'command': 'ollama launch qwen --model qwen3-coder:480b-cloud -- --bare',
+            'bootstrap_file': 'BOOTSTRAP_PROMPT.md',
+            'bootstrap_input': BOOTSTRAP_INPUT_QWEN_SYSTEM
         }
         print_info("Configuring Qwen3-Coder via Ollama...")
     elif choice == '6':
@@ -1672,6 +1687,7 @@ def cmd_setup(args):
         print_success(f"Agent '{agent_name}' configured successfully!")
         print_info(f"  Command: {agent_config['command']}")
         print_info(f"  Bootstrap: {agent_config['bootstrap_file']}")
+        print_info(f"  Bootstrap input: {get_bootstrap_input_mode(agent_config)}")
         if config.get('default_agent') == agent_name:
             print_info(f"  Default: Yes")
         print()
@@ -1706,6 +1722,7 @@ def cmd_agents(args):
         print(f"{name}{is_default}")
         print(f"  Command: {agent_config.get('command', 'N/A')}")
         print(f"  Bootstrap: {agent_config.get('bootstrap_file', 'N/A')}")
+        print(f"  Bootstrap input: {get_bootstrap_input_mode(agent_config)}")
         print()
 
     return 0
@@ -2041,6 +2058,92 @@ try {{
             return 1
 
 
+def get_bootstrap_input_mode(agent_config: dict) -> str:
+    """Return the configured bootstrap input mode for an agent."""
+    mode = agent_config.get('bootstrap_input', BOOTSTRAP_INPUT_ARGUMENT)
+    if mode not in VALID_BOOTSTRAP_INPUTS:
+        print_warning(
+            f"Unknown bootstrap input mode '{mode}', using '{BOOTSTRAP_INPUT_ARGUMENT}'"
+        )
+        return BOOTSTRAP_INPUT_ARGUMENT
+    return mode
+
+
+def build_argument_bootstrap_shell_command(
+    agent_command: str,
+    bootstrap_temp_path: str,
+    system: str
+) -> str:
+    """
+    Build a shell command that passes bootstrap content as a prompt argument.
+
+    This is the historical behavior and remains appropriate for tools whose
+    CLI stays interactive after receiving a prompt argument.
+    """
+    if system == 'windows':
+        escaped_path = bootstrap_temp_path.replace("'", "''")
+        agent_cmd_str = agent_command.replace("'", "''")
+        return f"& {agent_cmd_str} (Get-Content -Raw '{escaped_path}')"
+
+    import shlex
+    escaped_path = shlex.quote(bootstrap_temp_path)
+    return f"{agent_command} \"$(cat {escaped_path})\""
+
+
+def build_qwen_system_bootstrap_shell_command(
+    agent_command: str,
+    bootstrap_temp_path: str,
+    system: str
+) -> str:
+    """
+    Build a shell command that gives Qwen Code the bootstrap as system context
+    and uses a short first prompt to start the bootstrap sequence.
+
+    Qwen3-Coder sometimes treats a long bootstrap supplied only as the first
+    user prompt like a generic coding task.  Appending it to Qwen Code's system
+    prompt makes the initialization contract less ambiguous.
+    """
+    if system == 'windows':
+        escaped_path = bootstrap_temp_path.replace("'", "''")
+        agent_cmd_str = agent_command.replace("'", "''")
+        start_prompt = QWEN_BOOTSTRAP_START_PROMPT.replace("'", "''")
+        return (
+            f"& {agent_cmd_str} "
+            f"--append-system-prompt (Get-Content -Raw '{escaped_path}') "
+            f"--prompt-interactive '{start_prompt}'"
+        )
+
+    import shlex
+    escaped_path = shlex.quote(bootstrap_temp_path)
+    start_prompt = shlex.quote(QWEN_BOOTSTRAP_START_PROMPT)
+    return (
+        f"{agent_command} "
+        f"--append-system-prompt \"$(cat {escaped_path})\" "
+        f"--prompt-interactive {start_prompt}"
+    )
+
+
+def build_bootstrap_shell_command(
+    agent_command: str,
+    bootstrap_temp_path: str,
+    system: str,
+    bootstrap_input: str
+) -> str:
+    """Build the shell command for the configured bootstrap input mode."""
+    if bootstrap_input == BOOTSTRAP_INPUT_QWEN_SYSTEM:
+        return build_qwen_system_bootstrap_shell_command(
+            agent_command,
+            bootstrap_temp_path,
+            system
+        )
+
+    return build_argument_bootstrap_shell_command(
+        agent_command,
+        bootstrap_temp_path,
+        system
+    )
+
+
 # ============================================================================
 # Session Commands
 # ============================================================================
@@ -2172,13 +2275,11 @@ def cmd_start(args):
         transcript = None
 
     # Prepare agent command
-    import shlex
     import tempfile
 
-    # Write bootstrap content to a temp file.  The shell reads the file and
-    # passes its contents as the agent's prompt argument.  This avoids
-    # command-line length limits (Windows cmd.exe ~8,191 chars, CreateProcess
-    # ~32,767 chars) and is more robust than embedding large strings directly.
+    # Write bootstrap content to a temp file.  The launcher reads the file and
+    # delivers it according to the agent's bootstrap input mode instead of
+    # storing the expanded prompt directly in config.
     bootstrap_temp = tempfile.NamedTemporaryFile(
         mode='w', suffix='.md', prefix='samantha_bootstrap_',
         encoding='utf-8', delete=False
@@ -2209,16 +2310,14 @@ def cmd_start(args):
     session_start_time = time.time()
 
     # Build the shell command that reads bootstrap from the temp file.
-    # The file content is expanded inside the shell process so it never
-    # hits OS command-line length limits (8K on Windows cmd.exe).
     system = get_platform()
-    if system == 'windows':
-        escaped_path = bootstrap_temp_path.replace("'", "''")
-        agent_cmd_str = agent_command.replace("'", "''")
-        shell_cmd = f"& {agent_cmd_str} (Get-Content -Raw '{escaped_path}')"
-    else:
-        escaped_path = shlex.quote(bootstrap_temp_path)
-        shell_cmd = f"{agent_command} \"$(cat {escaped_path})\""
+    bootstrap_input = get_bootstrap_input_mode(agent_config)
+    shell_cmd = build_bootstrap_shell_command(
+        agent_command,
+        bootstrap_temp_path,
+        system,
+        bootstrap_input
+    )
 
     # Execute agent command with terminal recording
     if recording_file:

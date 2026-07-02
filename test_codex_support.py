@@ -94,8 +94,20 @@ class TestCodexSetup(unittest.TestCase):
         self.assertEqual(result, 0)
         saved = written[-1]
         self.assertEqual(saved['default_agent'], 'qwen3')
-        self.assertEqual(saved['agents']['qwen3']['command'], 'ollama run qwen3-coder:480b-cloud')
+        self.assertEqual(
+            saved['agents']['qwen3']['command'],
+            'ollama launch qwen --model qwen3-coder:480b-cloud -- --bare'
+        )
         self.assertEqual(saved['agents']['qwen3']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
+        self.assertEqual(saved['agents']['qwen3']['bootstrap_input'], 'qwen_system')
+
+    def test_bootstrap_input_defaults_to_argument_mode(self):
+        cli = load_cli_module()
+
+        self.assertEqual(
+            cli.get_bootstrap_input_mode({'command': 'claude'}),
+            'argument'
+        )
 
     def test_setup_default_accepts_codex(self):
         cli = load_cli_module()
@@ -123,6 +135,35 @@ class TestCodexSetup(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(written[-1]['default_agent'], 'codex')
+
+    def test_qwen3_prompt_interactive_command_receives_bootstrap_argument(self):
+        cli = load_cli_module()
+
+        command = cli.build_argument_bootstrap_shell_command(
+            'ollama launch qwen --model qwen3-coder:480b-cloud -- --prompt-interactive',
+            '/tmp/bootstrap prompt.md',
+            'linux'
+        )
+
+        self.assertIn('ollama launch qwen --model qwen3-coder:480b-cloud -- --prompt-interactive', command)
+        self.assertIn('"$(cat \'/tmp/bootstrap prompt.md\')"', command)
+        self.assertNotIn('script -q', command)
+
+    def test_qwen3_system_prompt_command_appends_bootstrap_to_system_prompt(self):
+        cli = load_cli_module()
+
+        command = cli.build_bootstrap_shell_command(
+            'ollama launch qwen --model qwen3-coder:480b-cloud -- --bare',
+            '/tmp/bootstrap prompt.md',
+            'linux',
+            'qwen_system'
+        )
+
+        self.assertIn('ollama launch qwen --model qwen3-coder:480b-cloud -- --bare', command)
+        self.assertIn('--append-system-prompt "$(cat \'/tmp/bootstrap prompt.md\')"', command)
+        self.assertIn('--prompt-interactive', command)
+        self.assertIn('Begin the Samantha Hartwell bootstrap now.', command)
+        self.assertNotIn('script -q', command)
 
 
 class TestCodexAnalyzer(unittest.TestCase):

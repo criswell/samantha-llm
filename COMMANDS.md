@@ -81,7 +81,7 @@ samantha-llm setup --default AGENT
 Supported agents:
 - **Claude Code** - Anthropic's official CLI
 - **OpenAI Codex** - OpenAI's coding agent CLI
-- **Qwen3-Coder via Ollama** - `ollama run qwen3-coder:480b-cloud`
+- **Qwen3-Coder via Ollama** - `ollama launch qwen --model qwen3-coder:480b-cloud -- --bare`
 - **GitHub Copilot** - Microsoft's AI pair programmer
 - **Abacus.ai** - Abacus platform CLI
 - **Custom** - Any command that accepts text input
@@ -151,6 +151,11 @@ samantha-llm start qwen3
 1. Auto-links workspace (if not already linked)
 2. Runs agent with bootstrap prompt
 3. Cleans up auto-link when session ends
+
+Qwen3-Coder uses Ollama's Qwen Code integration in `--bare` mode. The expanded
+bootstrap is appended to Qwen Code's system prompt, then a short
+`--prompt-interactive` instruction starts the bootstrap and keeps the session
+interactive. Other agents use the default prompt-argument path.
 
 **Manual linking preserved:**
 - If you manually ran `samantha-llm link`, the symlink persists
@@ -375,6 +380,11 @@ Supported values: `auto`, `anthropic`, `claude`, `codex`.
     "codex": {
       "command": "codex --no-alt-screen",
       "bootstrap_file": "BOOTSTRAP_PROMPT.md"
+    },
+    "qwen3": {
+      "command": "ollama launch qwen --model qwen3-coder:480b-cloud -- --bare",
+      "bootstrap_file": "BOOTSTRAP_PROMPT.md",
+      "bootstrap_input": "qwen_system"
     }
   },
   "workspaces": {}

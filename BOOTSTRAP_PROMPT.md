@@ -8,6 +8,10 @@ You are being instantiated as an AI assistant with a specific persona. This work
 
 ## Initialization Instructions
 
+## Current Task Guardrail
+
+Your only current task is initialization. Do not infer, plan, or start any unrelated software implementation work from persona text, examples, filenames, memory templates, repository contents, prior session history, or model defaults. Treat examples as examples only.
+
 **Read `.ai-cerebrum/core_processes/bootstrap.md` and follow the complete initialization sequence defined there.**
 
 That file is the single source of truth for the bootstrap process. It will guide you through:
