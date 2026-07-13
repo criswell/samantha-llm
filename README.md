@@ -53,6 +53,28 @@ When QMD (Query My Docs) is installed, memory search uses QMD for richer hybrid
 search. If QMD is missing or fails, `samantha-llm memories search` falls back
 to a small built-in local keyword search so basic recall still works.
 
+### Single Authoritative Memory
+
+This repository (the "cerebrum") is Samantha's authoritative memory system. Some
+agent substrates maintain their own native auto-memory that is injected into the
+session separately (e.g. Claude Code's `~/.claude` auto-memory). To avoid
+dual-memory divergence, `samantha-llm start` **disables a substrate's native
+auto-memory** so the cerebrum is the sole memory in session.
+
+- **Claude Code**: `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set in the child
+  process environment on launch. This suppresses the `~/.claude` auto-memory
+  system-prompt injection and blocks reads/writes to that directory from inside
+  the session. Manual `CLAUDE.md` files are unaffected.
+- **Default-on, per-substrate**: the disable is keyed off the agent's command
+  and is on by default — no config migration needed. Other substrates (Codex,
+  Qwen3-Coder, etc.) are unaffected until an analogous disable is added.
+- **Opt out** per agent by setting `disable_native_auto_memory: false` in that
+  agent's config, or override any env var via a per-agent `env` dict.
+
+This keeps the cerebrum authoritative across substrates; bare substrate
+invocations (not launched through `samantha-llm`) keep their native auto-memory
+as an escape hatch.
+
 ## Installation
 
 We have easy to follow instructions using the `samantha-llm` command line tool.
