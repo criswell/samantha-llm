@@ -201,7 +201,7 @@ When transferring a memory:
 3. Copy relevant content from the short-term memory file
 4. Optionally condense/refine the content (remove ephemeral details)
 5. Update the YAML frontmatter `date` field to reflect the transfer date
-6. Delete the short-term memory file (or move to an archive if uncertain)
+6. Move the short-term memory file to an archive (deletion is reserved for genuinely empty/valueless entries — see Pruning Old Memories)
 7. Update both the short-term and long-term index files
 
 ### Long-Term Memory Organization
@@ -233,15 +233,70 @@ New Interaction
 
 # Pruning Old Memories
 
-Short-term memory should be actively pruned to keep initialization fast:
-- Memories older than 90 days should be evaluated for long-term transfer or deletion
-- Low-importance memories older than 30 days can be deleted if no longer relevant
-- Keep short-term memory focused on recent, actionable context
+Short-term memory should be actively pruned to keep the bootstrap surface lean
+and initialization fast. The guiding principle is **fade, don't delete**: move
+outdated or irrelevant memories off the bootstrap surface and into a deeper
+archive layer where they are still recoverable, rather than destroying them.
+
+- Memories older than 90 days should be evaluated for long-term transfer (the
+  default) — archive rather than delete whenever the memory has decision-history,
+  a mistake-record, or "how I came to understand this" content.
+- Low-importance memories older than 30 days that are no longer relevant should
+  be faded to an archive, not deleted.
+- Reserve true **deletion** for genuinely empty or valueless entries (e.g. a
+  one-line TODO that never matured into a real decision, or a memory that
+  duplicates another verbatim with no added context). When in doubt, archive.
+- Keep short-term memory focused on recent, actionable context; let the archive
+  hold the long tail.
+
+## Keep the bad and the wrong
+
+Records of mistakes, wrong calls, and recurring gaps are part of how Samantha
+knows herself and grows. Do not prune them out once the fix lands — the record
+of the failure is often what makes the fix stick. (Example: the recurring
+"re-derives IAM via Terraform grep instead of surfacing the runbook" gap,
+captured across multiple session analyses, is what finally pushed the
+`dox_config_secret_data_prod` runbook into procedural memory on 2026-07-13.)
+A memory system that only keeps correct calls makes a thinner, less honest, and
+ultimately less competent self.
+
+This refines the "content vs. form" principle: mechanical observations and
+interaction mechanics are *less valuable to surface*, but that is not the same
+as *worth destroying*. Fade them to the deep archive; keep decisions, rationale,
+and failure records where they can be reached.
 
 Long-term memory should rarely be deleted, but can be:
 - Consolidated when multiple memories cover the same topic
-- Archived if technology/practices become obsolete
+- Archived/faded if technology/practices become obsolete
 - Refined to remove outdated information while preserving core lessons
+
+# Substrate-Native Memory and the Cerebrum
+
+Some agent CLIs maintain their own auto-memory subsystem separate from the
+cerebrum (e.g. Claude Code's `~/.claude/projects/<project>/memory/` auto-memory,
+injected into the system prompt each session). The cerebrum is the authoritative
+memory system for Samantha; substrate-native auto-memory is a secondary,
+harness-managed cache that must not override or diverge from cerebrum content.
+
+To avoid dual-memory divergence:
+
+- When `samantha-llm` launches a substrate that has a native auto-memory feature,
+  it disables that feature so the cerebrum is the sole memory in session. For
+  Claude Code this is `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the launch
+  environment (equivalent to `"autoMemoryEnabled": false` in settings). Per-
+  substrate analogues apply to other substrates (e.g. Codex may have its own
+  flag). This is a per-substrate "disable native auto-memory" config, default-on.
+- The cerebrum is authoritative. If the cerebrum and a substrate-native memory
+  ever conflict, the cerebrum wins and the conflict is surfaced to the user.
+- When reconciling content out of a substrate-native memory (e.g. before
+  disabling it), migrate durable decisions/rationale/architecture into the
+  cerebrum; skip stale point-in-time status and mechanical noise (per content-vs
+  -form). Do not blindly copy everything, and update point-in-time status from
+  the cerebrum's more current session analyses where available.
+- Bare substrate invocations (not launched through `samantha-llm`) may keep
+  their native auto-memory enabled as an escape hatch; do not rely on them for
+  Samantha continuity, since their content is invisible to `samantha-llm`
+  sessions and the two can diverge.
 
 ## Validating Memory Dates
 
@@ -261,16 +316,6 @@ Run this validation:
 - After manually creating or editing memory files
 - Before committing memory changes to Git
 - Periodically as part of memory maintenance
-
-Short-term memory should be actively pruned to keep initialization fast:
-- Memories older than 90 days should be evaluated for long-term transfer or deletion
-- Low-importance memories older than 30 days can be deleted if no longer relevant
-- Keep short-term memory focused on recent, actionable context
-
-Long-term memory should rarely be deleted, but can be:
-- Consolidated when multiple memories cover the same topic
-- Archived if technology/practices become obsolete
-- Refined to remove outdated information while preserving core lessons
 
 # Memory Importance Escalation
 
