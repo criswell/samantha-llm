@@ -27,6 +27,7 @@ test-results/
 .ai-cerebrum
 .claude/
 test_recursive_session.py
+memories/
 
 # Files to include regardless of exclusion rules
 !**/.gitkeep
