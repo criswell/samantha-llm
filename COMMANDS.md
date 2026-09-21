@@ -363,6 +363,28 @@ export SAMANTHA_ANALYZER=codex
 
 Supported values: `auto`, `anthropic`, `claude`, `codex`.
 
+### Analyzer auth for gateway users
+
+Headless (`claude --print`) analysis resolves auth before making any request:
+it uses `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` from the environment and
+otherwise falls back to the claude CLI's stored OAuth credentials, which
+expire and cannot always be refreshed. If your claude talks to an
+Anthropic-compatible gateway and the API key lives under a non-standard
+environment variable, remap it in `~/.config/samantha-llm/config.json`:
+
+```json
+{
+  "subconscious": {
+    "auth_token_env_vars": ["MY_GATEWAY_API_KEY"]
+  }
+}
+```
+
+The first listed variable that holds a value is passed to the analyzer as
+`ANTHROPIC_AUTH_TOKEN`. Explicit `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`
+in the environment always wins, and with nothing configured the analyzer
+behavior is unchanged (claude resolves its own auth).
+
 ---
 
 ## Configuration Files

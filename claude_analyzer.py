@@ -5,6 +5,7 @@ Claude-based conversation analyzer for subconscious processing.
 Uses Claude Code CLI in headless mode to analyze terminal recordings.
 """
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -92,8 +93,8 @@ class ClaudeAnalyzer(SubconsciousAnalyzer):
             # auth: the CLI's auth gate demands ANTHROPIC_API_KEY or
             # ANTHROPIC_AUTH_TOKEN before making any request, and falls back
             # to stored OAuth credentials (which expire) when neither is set.
-            # The Fireworks key keeps the analyzer working independently of
-            # the interactive OAuth session.
+            # _build_env optionally remaps a configured gateway key so the
+            # analyzer works independently of the interactive OAuth session.
             result = subprocess.run(
                 cmd,
                 input=recording_text,
@@ -124,22 +125,57 @@ class ClaudeAnalyzer(SubconsciousAnalyzer):
             )
 
     @staticmethod
-    def _build_env() -> dict:
-        """Build the subprocess env, injecting Fireworks auth if needed.
+    def _build_env(config_path: Optional[Path] = None) -> dict:
+        """Build the subprocess env, remapping gateway auth if configured.
 
-        Mirrors the claude-fireworks shell toggle's key precedence
-        (DOX_FIREWORKS_API_KEY first, FIREWORKS_API_KEY fallback). Only
-        injects when no explicit Anthropic auth is already in the
-        environment, so a user-provided ANTHROPIC_API_KEY or
-        ANTHROPIC_AUTH_TOKEN always wins.
+        Headless (--print) claude resolves its auth mode before making any
+        request: it uses ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from the
+        environment, and otherwise falls back to stored OAuth credentials,
+        which expire and cannot always be refreshed. Users whose claude
+        talks to an Anthropic-compatible gateway under a non-standard key
+        name can remap it via user config (see _auth_token_env_names).
+        Explicit env auth always wins; with nothing configured, behavior
+        is unchanged and claude resolves its own auth.
+
+        Args:
+            config_path: Optional explicit config path (used by tests to
+                stay hermetic; production callers use the default user
+                config location).
         """
         env = os.environ.copy()
         if env.get('ANTHROPIC_API_KEY') or env.get('ANTHROPIC_AUTH_TOKEN'):
             return env
-        fireworks_key = env.get('DOX_FIREWORKS_API_KEY') or env.get('FIREWORKS_API_KEY')
-        if fireworks_key:
-            env['ANTHROPIC_AUTH_TOKEN'] = fireworks_key
+        for name in ClaudeAnalyzer._auth_token_env_names(config_path=config_path):
+            value = env.get(name)
+            if value:
+                env['ANTHROPIC_AUTH_TOKEN'] = value
+                break
         return env
+
+    @staticmethod
+    def _auth_token_env_names(config_path: Optional[Path] = None) -> list:
+        """Env var names remappable into ANTHROPIC_AUTH_TOKEN for headless claude.
+
+        Read from user config, default location
+        ~/.config/samantha-llm/config.json:
+
+            "subconscious": {"auth_token_env_vars": ["MY_GATEWAY_KEY", ...]}
+
+        Order matters: the first name holding a value wins. Defaults to an
+        empty list (no remapping). Any read or parse failure is treated as
+        no configuration.
+        """
+        if config_path is None:
+            config_path = Path.home() / '.config' / 'samantha-llm' / 'config.json'
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            names = config.get('subconscious', {}).get('auth_token_env_vars', [])
+        except Exception:
+            return []
+        if not isinstance(names, list):
+            return []
+        return [n for n in names if isinstance(n, str) and n]
 
 
 def create_analyzer(prompt_path: Path, output_dir: Optional[Path] = None) -> ClaudeAnalyzer:
