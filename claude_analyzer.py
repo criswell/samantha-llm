@@ -5,6 +5,7 @@ Claude-based conversation analyzer for subconscious processing.
 Uses Claude Code CLI in headless mode to analyze terminal recordings.
 """
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -86,10 +87,17 @@ class ClaudeAnalyzer(SubconsciousAnalyzer):
         ]
 
         try:
-            # Run Claude with recording as stdin
+            # Run Claude with recording as stdin.
+            # Pass an explicit env so headless (--print) mode gets env-based
+            # auth: the CLI's auth gate demands ANTHROPIC_API_KEY or
+            # ANTHROPIC_AUTH_TOKEN before making any request, and falls back
+            # to stored OAuth credentials (which expire) when neither is set.
+            # The Fireworks key keeps the analyzer working independently of
+            # the interactive OAuth session.
             result = subprocess.run(
                 cmd,
                 input=recording_text,
+                env=self._build_env(),
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minute timeout
@@ -114,6 +122,24 @@ class ClaudeAnalyzer(SubconsciousAnalyzer):
             raise RuntimeError(
                 "Claude CLI not found. Is it installed and in PATH?"
             )
+
+    @staticmethod
+    def _build_env() -> dict:
+        """Build the subprocess env, injecting Fireworks auth if needed.
+
+        Mirrors the claude-fireworks shell toggle's key precedence
+        (DOX_FIREWORKS_API_KEY first, FIREWORKS_API_KEY fallback). Only
+        injects when no explicit Anthropic auth is already in the
+        environment, so a user-provided ANTHROPIC_API_KEY or
+        ANTHROPIC_AUTH_TOKEN always wins.
+        """
+        env = os.environ.copy()
+        if env.get('ANTHROPIC_API_KEY') or env.get('ANTHROPIC_AUTH_TOKEN'):
+            return env
+        fireworks_key = env.get('DOX_FIREWORKS_API_KEY') or env.get('FIREWORKS_API_KEY')
+        if fireworks_key:
+            env['ANTHROPIC_AUTH_TOKEN'] = fireworks_key
+        return env
 
 
 def create_analyzer(prompt_path: Path, output_dir: Optional[Path] = None) -> ClaudeAnalyzer:
