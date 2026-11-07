@@ -29,6 +29,19 @@ Creates:
   - **Linux/macOS**: Symlink in `~/.local/bin/`
   - **Windows**: Copy + .bat wrapper in `%LOCALAPPDATA%\Programs\samantha-llm\`
 
+### refresh
+
+Update the installed launcher from the repository recorded in your config. This
+is useful after pulling code changes; it does not recreate or alter config,
+personas, workspaces, or PATH.
+
+```bash
+samantha-llm refresh
+```
+
+On Windows this copies the updated script and recreates its batch wrapper. On
+Linux/macOS it repoints the command symlink at the configured repository.
+
 ### uninstall
 
 Remove samantha-llm installation.
