@@ -143,7 +143,7 @@ Then restart your shell or run `source ~/.bashrc` (or `~/.zshrc`).
 
 ## Quick Start (How to use Samantha)
 
-After completing the installation above, follow these steps to use Samantha in your projects.
+After completing the installation above, follow these steps to use Samantha in your projects. After pulling repository updates, run `samantha-llm refresh` to update the installed launcher without resetting your configuration.
 
 You will need an agentic LLM tool. The recommended tool is [Claude Code](https://claude.ai/code) by Anthropic. OpenAI Codex and Qwen3-Coder via Ollama are also supported.
 
@@ -224,8 +224,12 @@ ollama launch qwen --config --model qwen3-coder:480b-cloud --yes
 
    **Alternative agents (e.g., Abacus.ai):**
    ```bash
-   npx abacusai "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
+   abacusai "$(cat .ai-cerebrum/BOOTSTRAP_PROMPT.md)"
    ```
+
+   The Abacus CLI accepts an initial message as a positional argument and
+   continues into its interactive session. `samantha-llm start` uses the
+   installed `abacusai` executable directly, rather than routing through `npx`.
 
 ## Philosophy
 

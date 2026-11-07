@@ -633,11 +633,11 @@ def reset_subconscious_prompt():
     print_success(f"Prompt reset: {prompt_path}")
 
 
-def install_unix():
+def install_unix(repo_dir=None):
     """Install on Unix-like systems (Linux, macOS) using symlink"""
     install_dir = get_install_dir()
     install_path = get_install_path()
-    repo_dir = get_repo_dir()
+    repo_dir = Path(repo_dir) if repo_dir else get_repo_dir()
     source_script = repo_dir / FILENAME
 
     # Create install directory
@@ -658,11 +658,11 @@ def install_unix():
     source_script.chmod(source_script.stat().st_mode | 0o111)
 
 
-def install_windows():
+def install_windows(repo_dir=None, configure_path=True):
     """Install on Windows by copying script and creating batch wrapper"""
     install_dir = get_install_dir()
     install_path = get_install_path()
-    repo_dir = get_repo_dir()
+    repo_dir = Path(repo_dir) if repo_dir else get_repo_dir()
     source_script = repo_dir / FILENAME
 
     # Create install directory
@@ -680,8 +680,8 @@ def install_windows():
     wrapper_content = f'@echo off\npython "{script_target}" %*\n'
     install_path.write_text(wrapper_content, encoding='utf-8')
 
-    # Add to PATH
-    if not check_path():
+    # Add to PATH during install, but leave the user's environment untouched on refresh.
+    if configure_path and not check_path():
         print_info("Adding install directory to PATH...")
         if add_to_windows_path(install_dir):
             print_success("Added to PATH successfully")
@@ -792,6 +792,34 @@ def cmd_install(args):
     else:
         print_success("The samantha-llm command is ready to use!")
 
+    return 0
+
+
+def cmd_refresh(args):
+    """Refresh the installed launcher without changing user configuration."""
+    config = read_config()
+    if not config:
+        print_error("Configuration not found. Run 'samantha-llm install' first.")
+        return 1
+
+    if not is_installed():
+        print_error("samantha-llm is not installed. Run 'samantha-llm install' first.")
+        return 1
+
+    repo_dir = Path(config.get('repo_path', '')).expanduser()
+    source_script = repo_dir / FILENAME
+    if not source_script.is_file():
+        print_error(f"Repository script not found: {source_script}")
+        return 1
+
+    print_info(f"Refreshing launcher from: {source_script}")
+    if get_platform() == 'windows':
+        install_windows(repo_dir=repo_dir, configure_path=False)
+    else:
+        install_unix(repo_dir=repo_dir)
+
+    print_success(f"Launcher refreshed: {get_install_path()}")
+    print_info("Configuration, personas, workspaces, and PATH were left unchanged.")
     return 0
 
 
@@ -1299,6 +1327,7 @@ def cmd_help(args):
 
 Usage:
     samantha-llm install           Install samantha-llm and configure environment
+    samantha-llm refresh           Update the installed launcher without resetting config
     samantha-llm uninstall         Remove samantha-llm installation
     samantha-llm setup             Configure an agent for LLM sessions
     samantha-llm setup --default AGENT  Set default agent
@@ -1614,7 +1643,7 @@ def cmd_setup(args):
     elif choice == '2':
         agent_name = 'abacus'
         agent_config = {
-            'command': 'npx abacusai',
+            'command': 'abacusai',
             'bootstrap_file': 'BOOTSTRAP_PROMPT.md'
         }
         print_info("Configuring Abacus.ai...")
@@ -2079,6 +2108,17 @@ try {{
             return 1
 
 
+def resolve_agent_command(agent_name: str, agent_command: str) -> str:
+    """Prefer the installed Abacus CLI over its npx wrapper when available."""
+    if (
+        agent_name == 'abacus'
+        and agent_command.strip().lower() == 'npx abacusai'
+        and shutil.which('abacusai')
+    ):
+        return 'abacusai'
+    return agent_command
+
+
 def get_bootstrap_input_mode(agent_config: dict) -> str:
     """Return the configured bootstrap input mode for an agent."""
     mode = agent_config.get('bootstrap_input', BOOTSTRAP_INPUT_ARGUMENT)
@@ -2232,7 +2272,11 @@ def cmd_start(args):
         return 1
 
     agent_config = agents[agent_name]
-    agent_command = agent_config.get('command')
+    agent_command = resolve_agent_command(
+        agent_name,
+        agent_config.get('command', '')
+    )
+    agent_config = {**agent_config, 'command': agent_command}
     bootstrap_file = agent_config.get('bootstrap_file', 'BOOTSTRAP_PROMPT.md')
 
     if not agent_command:
@@ -3586,7 +3630,7 @@ def main():
         add_help=False
     )
     parser.add_argument('command', nargs='?', default='help',
-                        choices=['install', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'projects', 'personas', 'register-persona', 'unregister-persona', 'help', 'version'],
+                        choices=['install', 'refresh', 'uninstall', 'status', 'link', 'unlink', 'setup', 'agents', 'start', 'qmd', 'memories', 'subconscious', 'projects', 'personas', 'register-persona', 'unregister-persona', 'help', 'version'],
                         help='Command to execute')
     parser.add_argument('subcommand', nargs='?', default=None,
                         help='Subcommand (for qmd command)')
@@ -3609,6 +3653,7 @@ def main():
 
     commands = {
         'install': cmd_install,
+        'refresh': cmd_refresh,
         'uninstall': cmd_uninstall,
         'status': cmd_status,
         'link': cmd_link,

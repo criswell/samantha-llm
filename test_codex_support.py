@@ -72,6 +72,29 @@ class TestCodexSetup(unittest.TestCase):
         self.assertEqual(saved['agents']['codex']['command'], 'codex --no-alt-screen')
         self.assertEqual(saved['agents']['codex']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
 
+    def test_interactive_setup_adds_abacus_agent_using_installed_cli(self):
+        cli = load_cli_module()
+        config = {
+            'version': '0.5.0',
+            'repo_path': '/tmp/samantha-llm',
+            'agents': {},
+            'workspaces': {},
+        }
+        written = []
+
+        def write_config(updated):
+            written.append(copy.deepcopy(updated))
+            return True
+
+        with patch.object(cli, 'read_config', return_value=config), \
+             patch.object(cli, 'write_config', side_effect=write_config), \
+             patch('builtins.input', side_effect=['2']):
+            result = cli.cmd_setup(SimpleNamespace(default_agent=None))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(written[-1]['default_agent'], 'abacus')
+        self.assertEqual(written[-1]['agents']['abacus']['command'], 'abacusai')
+
     def test_interactive_setup_adds_qwen3_agent(self):
         cli = load_cli_module()
         config = {
@@ -109,6 +132,96 @@ class TestCodexSetup(unittest.TestCase):
             'argument'
         )
 
+    def test_legacy_abacus_npx_command_uses_installed_cli(self):
+        cli = load_cli_module()
+
+        with patch.object(cli.shutil, 'which', return_value='C:/tools/abacusai.CMD'):
+            self.assertEqual(
+                cli.resolve_agent_command('abacus', 'npx abacusai'),
+                'abacusai'
+            )
+
+    def test_legacy_abacus_npx_command_is_preserved_without_installed_cli(self):
+        cli = load_cli_module()
+
+        with patch.object(cli.shutil, 'which', return_value=None):
+            self.assertEqual(
+                cli.resolve_agent_command('abacus', 'npx abacusai'),
+                'npx abacusai'
+            )
+
+    def test_other_agent_commands_are_not_rewritten(self):
+        cli = load_cli_module()
+
+        with patch.object(cli.shutil, 'which', return_value='C:/tools/abacusai.CMD'):
+            self.assertEqual(
+                cli.resolve_agent_command('custom', 'npx abacusai'),
+                'npx abacusai'
+            )
+
+    def test_refresh_updates_launcher_from_configured_repo_without_writing_config(self):
+        cli = load_cli_module()
+        config = {
+            'repo_path': 'C:/work/samantha-llm',
+            'default_agent': 'abacus',
+            'agents': {'abacus': {'command': 'abacusai'}},
+            'personas': {'samantha-hartwell': {'type': 'builtin'}},
+            'workspaces': {'C:/work/app': {'manual': True}},
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir)
+            (repo_dir / 'samantha-llm').write_text('launcher', encoding='utf-8')
+            config['repo_path'] = str(repo_dir)
+            original_config = copy.deepcopy(config)
+
+            with patch.object(cli, 'read_config', return_value=config), \
+                 patch.object(cli, 'is_installed', return_value=True), \
+                 patch.object(cli, 'get_platform', return_value='windows'), \
+                 patch.object(cli, 'install_windows') as install_windows, \
+                 patch.object(cli, 'get_install_path', return_value=Path('C:/install/samantha-llm.bat')):
+                result = cli.cmd_refresh(SimpleNamespace())
+
+        self.assertEqual(result, 0)
+        install_windows.assert_called_once_with(repo_dir=repo_dir, configure_path=False)
+        self.assertEqual(config, original_config)
+
+    def test_windows_refresh_copies_launcher_without_modifying_path(self):
+        cli = load_cli_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_dir = root / 'repo'
+            install_dir = root / 'install'
+            repo_dir.mkdir()
+            (repo_dir / 'samantha-llm').write_text('updated launcher', encoding='utf-8')
+            install_dir.mkdir()
+            wrapper = install_dir / 'samantha-llm.bat'
+
+            with patch.object(cli, 'get_install_dir', return_value=install_dir), \
+                 patch.object(cli, 'get_install_path', return_value=wrapper), \
+                 patch.object(cli, 'check_path') as check_path, \
+                 patch.object(cli, 'add_to_windows_path') as add_to_path:
+                cli.install_windows(repo_dir=repo_dir, configure_path=False)
+
+            installed_script = (install_dir / 'samantha-llm').read_text(encoding='utf-8')
+            self.assertEqual(installed_script, 'updated launcher')
+            self.assertIn('python', wrapper.read_text(encoding='utf-8'))
+            check_path.assert_not_called()
+            add_to_path.assert_not_called()
+
+    def test_refresh_fails_when_configured_repo_has_no_launcher(self):
+        cli = load_cli_module()
+        config = {'repo_path': 'C:/missing/repo'}
+
+        with patch.object(cli, 'read_config', return_value=config), \
+             patch.object(cli, 'is_installed', return_value=True), \
+             patch.object(cli, 'install_windows') as install_windows:
+            result = cli.cmd_refresh(SimpleNamespace())
+
+        self.assertEqual(result, 1)
+        install_windows.assert_not_called()
+
     def test_setup_default_accepts_codex(self):
         cli = load_cli_module()
         config = {
@@ -135,6 +248,21 @@ class TestCodexSetup(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(written[-1]['default_agent'], 'codex')
+
+    def test_abacus_windows_command_passes_bootstrap_as_initial_message(self):
+        cli = load_cli_module()
+
+        command = cli.build_bootstrap_shell_command(
+            'abacusai',
+            r'C:\Users\Owner\AppData\Local\Temp\bootstrap prompt.md',
+            'windows',
+            'argument'
+        )
+
+        self.assertEqual(
+            command,
+            "& abacusai (Get-Content -Raw 'C:\\Users\\Owner\\AppData\\Local\\Temp\\bootstrap prompt.md')"
+        )
 
     def test_qwen3_prompt_interactive_command_receives_bootstrap_argument(self):
         cli = load_cli_module()
