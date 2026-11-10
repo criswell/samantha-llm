@@ -3102,10 +3102,14 @@ def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filt
     # markdown is default for qmd
 
     try:
+        # qmd can hang indefinitely (rerank path via node-llama-cpp);
+        # TimeoutExpired is an Exception subclass, so the handler below
+        # catches it and falls back to local keyword search.
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=30
         )
 
         if result.returncode != 0:
@@ -3159,7 +3163,9 @@ def cmd_memories(args):
             return 1
 
         # For now, use defaults (can be enhanced with proper arg parsing later)
-        mode = 'hybrid'
+        # 'semantic' (qmd vsearch) works reliably; 'hybrid' (qmd query) can hang
+        # in the rerank path, so it is guarded by the timeout in search_memories
+        mode = 'semantic'
         format_type = 'markdown'
         limit = 10
 
@@ -3180,8 +3186,8 @@ def cmd_memories(args):
         print_info("  samantha-llm memories search 'API design patterns'")
         print()
         print_info("Search modes:")
-        print_info("  Default: hybrid (keyword + semantic + AI re-ranking)")
-        print_info("  Use qmd directly for advanced options (--keyword, --semantic)")
+        print_info("  Default: semantic (vector search with query expansion)")
+        print_info("  Use qmd directly for advanced options (search, vsearch, query)")
         return 0
 
     else:
