@@ -2977,98 +2977,41 @@ def local_search_memories(query, format_type='markdown', limit=10):
 
 
 def index_cerebrum():
-    """Index cerebrum files with qmd"""
+    """Refresh the qmd memory index.
+
+    Uses qmd_integration.refresh_qmd_index: rebuilds a symlink view of the
+    cerebrum (qmd's scanner skips hidden `.ai/` directories, so a
+    collection rooted at the cerebrum itself cannot see the canonical
+    memory layout), re-points the collection when needed, then runs an
+    incremental `qmd update` and embeds any pending vectors.
+    """
     if not is_qmd_installed():
         print_error("qmd is not installed")
         print_info("Install with: samantha-llm qmd install")
         return False
 
-    print_info("Indexing cerebrum files...")
-    print()
-
-    # Get memory directories
-    memory_dirs = get_memory_directories()
-
-    # Check which directories exist
-    existing_dirs = [d for d in memory_dirs if d.exists()]
-
-    if not existing_dirs:
-        print_warning("No memory directories found")
-        print_info("Memory directories checked:")
-        for d in memory_dirs:
-            print_info(f"  {d}")
-        return False
-
-    print_info(f"Found {len(existing_dirs)} memory directories:")
-    for d in existing_dirs:
-        file_count = len(list(d.glob('*.md')))
-        print_info(f"  {d.name}: {file_count} files")
-    print()
-
-    # Get qmd binary path
-    qmd_bin = get_qmd_bin_path()
-    if not qmd_bin:
-        print_error("qmd is not installed")
-        print_info("Install with: samantha-llm qmd install")
-        return False
-
-    collection_name = "samantha-cerebrum"
-
-    print_info(f"Creating/updating collection: {collection_name}")
-    print()
-
-    # Remove existing collection if it exists
     try:
-        remove_cmd = [qmd_bin, 'collection', 'remove', collection_name]
-        subprocess.run(remove_cmd, capture_output=True, text=True)
-        print_info("Removed existing collection")
-    except:
-        pass  # Collection might not exist yet
+        from qmd_integration import refresh_qmd_index
+    except ImportError:
+        print_error("memories index requires the full repo checkout (qmd_integration.py)")
+        print_info("A script-only install can index manually: see 'qmd collection add'")
+        return False
 
-    # Index the cerebrum .ai directory once (recursive)
+    print_info("Refreshing qmd memory index (view + update + embed)...")
+    print()
+
     cerebrum = get_cerebrum_path()
-    cerebrum_ai = cerebrum / '.ai'
-
-    print_info(f"Indexing cerebrum directory...")
-    print_info(f"  Path: {cerebrum_ai}")
-    print_info(f"  Files: {len(list(cerebrum_ai.rglob('*.md')))} markdown files")
-    print()
-
-    try:
-        cmd = [qmd_bin, 'collection', 'add', str(cerebrum_ai), '--name', collection_name, '--mask', '**/*.md']
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True
-        )
-
-        if result.returncode != 0:
-            print_error(f"Indexing failed: {result.stderr.strip()}")
-            return False
-
-        print_success("Indexed cerebrum successfully!")
-
-    except Exception as e:
-        print_error(f"Indexing failed: {e}")
-        return False
-
-    # Add context for the collection
-    try:
-        context_cmd = [
-            qmd_bin, 'context', 'add', '/',
-            'Personal memory system for Samantha Hartwell, an AI software engineer. Contains memories of past work, technical decisions, and ongoing projects.'
-        ]
-        subprocess.run(context_cmd, capture_output=True, text=True)
-        print_info("Added context metadata")
-    except:
-        pass  # Context is optional
+    ok = refresh_qmd_index(cerebrum, quiet=False)
 
     print()
-    print_success("Cerebrum indexing complete!")
-    print_info(f"Collection: {collection_name}")
-    print_info("Use: samantha-llm memories search \"<query>\"")
-
-    return True
+    if ok:
+        print_success("Memory index refreshed!")
+        print_info("  - Search memories: samantha-llm memories search <query>")
+        print_info("  - Check status: qmd status")
+    else:
+        print_warning("Index refresh did not complete (see messages above)")
+        print_info("The search still works on the last good index.")
+    return ok
 
 
 def search_memories(query, mode='hybrid', format_type='markdown', limit=10, filters=None):

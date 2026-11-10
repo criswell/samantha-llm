@@ -499,6 +499,21 @@ def merge_completed_sessions(cerebrum_path: Path, dry_run: bool = False):
 
         print(f" ✓ ({memory_count} memories)")
 
+    # Refresh the qmd search index so newly merged memories are searchable.
+    # Best-effort: a qmd problem must never fail the merge itself.
+    print("  4. Refreshing qmd search index...", end='', flush=True)
+    try:
+        from qmd_integration import refresh_qmd_index
+        # Cap embedding at 2 minutes per merge: embeds are resumable, so a
+        # large backlog (e.g. first run after installing this) drains over
+        # successive merges instead of stalling this one.
+        if refresh_qmd_index(cerebrum_path, quiet=True, embed_timeout=120):
+            print(" ✓")
+        else:
+            print(" (skipped; run 'samantha-llm memories index' for details)")
+    except Exception as e:
+        print(f" (skipped: {e})")
+
     print(f"\n✓ Merge complete!")
     print(f"  - Sessions merged: {len(completed)}")
     print(f"  - Memories moved: {total_memories}")
