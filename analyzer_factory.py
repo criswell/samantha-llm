@@ -70,8 +70,21 @@ def create_named_analyzer(name: str, prompt_path: Path, output_dir: Optional[Pat
             raise RuntimeError("Codex CLI not found. Is it installed and in PATH?")
         return codex_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
 
+    # Any configured agent with a headless spec (built-in like opencode, or
+    # user-defined under subconscious.headless_commands).
+    try:
+        import headless_agent_analyzer
+        analyzer, _resolved = headless_agent_analyzer.create_agent_analyzer(
+            prompt_path, output_dir=output_dir, agent_name=normalized
+        )
+        if analyzer is not None:
+            return analyzer
+    except RuntimeError:
+        pass
+
     raise RuntimeError(
-        f"Unknown analyzer '{name}'. Supported analyzers: anthropic, claude, codex"
+        f"Unknown analyzer '{name}'. Supported analyzers: anthropic, claude, codex, "
+        f"or any configured agent with a headless spec (e.g. opencode)"
     )
 
 
@@ -89,6 +102,22 @@ def create_best_analyzer(prompt_path: Path, output_dir: Optional[Path] = None, a
     requested = os.environ.get('SAMANTHA_ANALYZER', '').strip()
     if requested and requested.lower() != 'auto':
         return create_named_analyzer(requested, prompt_path, output_dir)
+
+    # 1.5. Config-driven agent reuse: subconscious.analyzer_agent names the
+    # configured agent whose headless mode should run analysis. Explicit
+    # requests raise on failure; 'auto' falls through to the legacy ladder.
+    try:
+        import headless_agent_analyzer
+        analyzer, _resolved = headless_agent_analyzer.create_agent_analyzer(
+            prompt_path, output_dir=output_dir
+        )
+        if analyzer is not None:
+            return analyzer
+    except RuntimeError:
+        if headless_agent_analyzer.load_subconscious_config().get('analyzer_agent') not in (None, '', 'auto'):
+            raise  # explicit config: surface the failure, do not silently 403 on claude
+    except Exception:
+        pass
 
     if HAS_ANTHROPIC_ANALYZER and os.environ.get('ANTHROPIC_API_KEY'):
         return anthropic_analyzer.create_analyzer(prompt_path, output_dir=output_dir)
