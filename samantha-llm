@@ -236,20 +236,78 @@ def read_config():
         return None
 
 
+# Top-level config.json keys samantha-llm manages directly. When writing,
+# keys NOT in this set (e.g. the user's `subconscious` section) are preserved
+# from the on-disk file even when this process's in-memory config predates
+# their addition, so CLI writes never silently drop keys they do not know
+# about.
+MANAGED_CONFIG_KEYS = {
+    'version',
+    'platform',
+    'repo_path',
+    'default_persona',
+    'personas',
+    'agents',
+    'workspaces',
+}
+
+
 def write_config(config):
-    """Write JSON config file"""
+    """Write JSON config file, preserving unmanaged top-level keys.
+
+    write_config is called with the in-memory config dict the process read at
+    start. If config.json changed on disk since then (e.g. the user added a
+    `subconscious` section while a samantha-llm session was running), a
+    whole-file overwrite from the stale in-memory state would silently drop
+    those keys. To prevent that, the on-disk file is re-read at write time and
+    every top-level key NOT in MANAGED_CONFIG_KEYS is carried over from disk.
+    Managed keys keep the in-memory values, so caller intent (including
+    deletions) still wins for everything the CLI owns.
+
+    Deletion of an unmanaged key: no current call site deletes an unmanaged
+    key (the CLI only ever mutates managed keys), so absent-from-caller is
+    always treated as "stale process" and the disk value is preserved. A
+    future call site that needs to DELETE an unmanaged key must do explicit
+    file surgery rather than rely on write_config.
+
+    The write is atomic (temp file + rename) so a crash cannot leave a
+    truncated config.json behind.
+    """
     config_file = get_config_file()
     config_dir = get_config_dir()
 
     # Create config directory if needed
     config_dir.mkdir(parents=True, exist_ok=True)
 
+    # Merge: preserve unmanaged top-level keys from the on-disk file. The
+    # disk dict is only consulted for keys the caller's dict does not mention
+    # at all, so a stale in-memory config (one written before the user added
+    # an unmanaged section) cannot erase it.
+    merged = dict(config)
     try:
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2)
+        if config_file.exists():
+            with open(config_file, 'r', encoding='utf-8') as f:
+                on_disk = json.load(f)
+            if isinstance(on_disk, dict):
+                for key, value in on_disk.items():
+                    if key not in MANAGED_CONFIG_KEYS and key not in config:
+                        merged[key] = value
+    except (OSError, ValueError):
+        pass  # unreadable disk state: write the caller's dict as-is
+
+    # Atomic write: temp file in the same directory, then rename over
+    tmp_file = config_file.with_suffix('.json.tmp')
+    try:
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            json.dump(merged, f, indent=2)
+        os.replace(tmp_file, config_file)
         return True
     except Exception as e:
         print_error(f"Failed to write config: {e}")
+        try:
+            tmp_file.unlink()
+        except OSError:
+            pass
         return False
 
 

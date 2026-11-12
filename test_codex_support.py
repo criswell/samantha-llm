@@ -374,10 +374,47 @@ class TestCodexAnalyzer(unittest.TestCase):
 class TestAnalyzerFactory(unittest.TestCase):
     """Tests for provider selection."""
 
+    def setUp(self):
+        """Isolate the factory from the real user config.
+
+        The factory's step 1.5 (config-driven agent reuse) reads the real
+        ~/.config/samantha-llm/config.json unless SAMANTHA_LLM_CONFIG points
+        elsewhere. On any box with default_agent set (e.g. abacus),
+        HeadlessAgentAnalyzer would win the ladder and these tests would test
+        the machine, not the code. Some tests below use patch.dict(os.environ,
+        clear=True), which would wipe an env var set in setUp, so the
+        guarantee must be re-applied inside each with-block via the
+        `pinned_env` helper: it re-adds SAMANTHA_LLM_CONFIG on top of the
+        cleared environment.
+        """
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config_path = Path(self._tmp.name) / 'config.json'
+        self._orig_config_env = os.environ.get('SAMANTHA_LLM_CONFIG')
+        os.environ['SAMANTHA_LLM_CONFIG'] = str(self.config_path)
+
+    def tearDown(self):
+        if self._orig_config_env is None:
+            os.environ.pop('SAMANTHA_LLM_CONFIG', None)
+        else:
+            os.environ['SAMANTHA_LLM_CONFIG'] = self._orig_config_env
+        self._tmp.cleanup()
+
+    def pinned_env(self, **overrides):
+        """Environment mapping for patch.dict(clear=True) that keeps
+        SAMANTHA_LLM_CONFIG pinned to the test config path."""
+        env = dict(overrides)
+        env['SAMANTHA_LLM_CONFIG'] = str(self.config_path)
+        return env
+
+    def write_subconscious_config(self, payload):
+        """Write a config.json the factory's step 1.5 will find."""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(json.dumps(payload))
+
     def test_explicit_codex_env_selects_codex(self):
         fake_codex = FakeAnalyzerModule('codex')
 
-        with patch.dict(os.environ, {'SAMANTHA_ANALYZER': 'codex'}, clear=True), \
+        with patch.dict(os.environ, self.pinned_env(SAMANTHA_ANALYZER='codex'), clear=True), \
              patch.object(analyzer_factory, 'HAS_CODEX_ANALYZER', True), \
              patch.object(analyzer_factory, 'codex_analyzer', fake_codex), \
              patch.object(analyzer_factory, 'codex_available', return_value=True):
@@ -385,11 +422,39 @@ class TestAnalyzerFactory(unittest.TestCase):
 
         self.assertEqual(analyzer['name'], 'codex')
 
+    def test_config_driven_analyzer_wins_when_configured(self):
+        """Step 1.5: subconscious.analyzer_agent beats the legacy ladder."""
+        fake_anthropic = FakeAnalyzerModule('anthropic')
+        fake_codex = FakeAnalyzerModule('codex')
+        self.write_subconscious_config({
+            'subconscious': {'analyzer_agent': 'opencode'},
+        })
+
+        def fake_create_agent_analyzer(prompt_path, output_dir=None):
+            return {'name': 'headless'}, 'opencode'
+
+        fake_headless_module = SimpleNamespace(
+            load_subconscious_config=lambda: {
+                'analyzer_agent': 'opencode'},
+            create_agent_analyzer=fake_create_agent_analyzer,
+        )
+
+        with patch.dict(os.environ, self.pinned_env(ANTHROPIC_API_KEY='test-key'), clear=True), \
+             patch.object(analyzer_factory, 'HAS_ANTHROPIC_ANALYZER', True), \
+             patch.object(analyzer_factory, 'HAS_CODEX_ANALYZER', True), \
+             patch.object(analyzer_factory, 'anthropic_analyzer', fake_anthropic), \
+             patch.object(analyzer_factory, 'codex_analyzer', fake_codex), \
+             patch.object(analyzer_factory, 'codex_available', return_value=True), \
+             patch.dict('sys.modules', {'headless_agent_analyzer': fake_headless_module}):
+            analyzer = analyzer_factory.create_best_analyzer(Path('/tmp/prompt.txt'))
+
+        self.assertEqual(analyzer['name'], 'headless')
+
     def test_codex_session_prefers_codex_before_claude(self):
         fake_codex = FakeAnalyzerModule('codex')
         fake_claude = FakeAnalyzerModule('claude')
 
-        with patch.dict(os.environ, {}, clear=True), \
+        with patch.dict(os.environ, self.pinned_env(), clear=True), \
              patch.object(analyzer_factory, 'HAS_ANTHROPIC_ANALYZER', False), \
              patch.object(analyzer_factory, 'HAS_CODEX_ANALYZER', True), \
              patch.object(analyzer_factory, 'HAS_CLAUDE_ANALYZER', True), \
@@ -404,7 +469,7 @@ class TestAnalyzerFactory(unittest.TestCase):
         fake_anthropic = FakeAnalyzerModule('anthropic')
         fake_codex = FakeAnalyzerModule('codex')
 
-        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key'}, clear=True), \
+        with patch.dict(os.environ, self.pinned_env(ANTHROPIC_API_KEY='test-key'), clear=True), \
              patch.object(analyzer_factory, 'HAS_ANTHROPIC_ANALYZER', True), \
              patch.object(analyzer_factory, 'HAS_CODEX_ANALYZER', True), \
              patch.object(analyzer_factory, 'anthropic_analyzer', fake_anthropic), \
