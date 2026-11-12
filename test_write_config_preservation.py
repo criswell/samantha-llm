@@ -128,6 +128,119 @@ class WriteConfigPreservationTests(unittest.TestCase):
         leftovers = list(self.config_file.parent.glob('*.tmp'))
         self.assertEqual(leftovers, [], 'atomic write must not leave temp files')
 
+    # --- Intent-based API (changes=) tests: the 2026-11-12 (x2) fix ---
+
+    def test_changes_set_survives_stale_concurrent_write(self):
+        """THE incident, fixed: a process started before the user added the
+        subconscious section exits afterward and writes. Its changes= names
+        only the key it mutated; the user's section survives even though it
+        was absent from the caller's snapshot AND absent from disk at some
+        intermediate moment."""
+        # Disk state when the process started (no subconscious yet)
+        initial = {
+            'version': '0.5.0',
+            'platform': 'linux',
+            'repo_path': '/opt/samantha-llm',
+            'agents': {'abacus': {'command': 'abacusai'}},
+            'workspaces': {},
+        }
+        self.write_disk(initial)
+        stale_snapshot = dict(initial)
+
+        # User adds the section by hand mid-flight
+        user_edit = dict(initial)
+        user_edit['subconscious'] = {'analyzer_agent': 'abacus'}
+        self.write_disk(user_edit)
+
+        # Stale process exits: it only mutated workspaces (auto-link)
+        ok = self.cli.write_config(
+            stale_snapshot,
+            changes={'set': {'workspaces': {'/home/sam/work': {
+                'linked_at': '2026-11-12T18:24:18', 'manual': False}}}},
+        )
+        self.assertTrue(ok)
+        merged = self.read_disk()
+        self.assertEqual(
+            merged['subconscious'], {'analyzer_agent': 'abacus'},
+            'user edit must survive a write whose changes= never mentioned it'
+        )
+        self.assertEqual(
+            merged['workspaces']['/home/sam/work']['manual'], False,
+            'the explicitly requested change must land'
+        )
+        self.assertEqual(merged['repo_path'], '/opt/samantha-llm')
+
+    def test_changes_delete_removes_named_key_only(self):
+        """Exit cleanup deletes its own workspaces entry without touching
+        anything else."""
+        self.write_disk({
+            'version': '0.5.0',
+            'workspaces': {'/home/sam/work': {'manual': False}},
+            'subconscious': {'analyzer_agent': 'abacus'},
+        })
+        self.assertTrue(self.cli.write_config(
+            {},  # snapshot irrelevant in changes= mode
+            changes={'delete': ['workspaces']},
+        ))
+        merged = self.read_disk()
+        self.assertNotIn('workspaces', merged)
+        self.assertEqual(
+            merged['subconscious'], {'analyzer_agent': 'abacus'},
+            'delete is surgical: named key only'
+        )
+
+    def test_changes_delete_unmanaged_key_allowed(self):
+        """Explicit intent may delete unmanaged keys (documented escape
+        hatch); preservation only applies to keys the write never named."""
+        self.write_disk({
+            'version': '0.5.0',
+            'subconscious': {'analyzer_agent': 'abacus'},
+        })
+        self.assertTrue(self.cli.write_config(
+            {}, changes={'delete': ['subconscious']}
+        ))
+        self.assertNotIn('subconscious', self.read_disk())
+
+    def test_changes_is_merge_base_not_snapshot(self):
+        """The merge base is the CURRENT disk file, not the caller's dict:
+        a managed key the caller never touched keeps its on-disk value
+        (which may be newer than the caller's snapshot)."""
+        self.write_disk({
+            'version': '0.5.0',
+            'agents': {'abacus': {'command': 'abacusai'}, 'opencode': {'command': 'opencode --prompt'}},
+        })
+        stale = {'version': '0.5.0', 'agents': {'abacus': {'command': 'abacusai'}}}
+        self.assertTrue(self.cli.write_config(
+            stale,
+            changes={'set': {'default_agent': 'abacus'}},
+        ))
+        merged = self.read_disk()
+        self.assertEqual(merged['default_agent'], 'abacus')
+        self.assertIn(
+            'opencode', merged['agents'],
+            'agent added by a newer process must not be reverted'
+        )
+
+    def test_changes_on_missing_file_writes_clean(self):
+        self.assertTrue(self.cli.write_config(
+            {}, changes={'set': {'version': '0.5.0'}}
+        ))
+        self.assertEqual(self.read_disk(), {'version': '0.5.0'})
+
+    def test_changes_no_tmp_file_left_behind(self):
+        self.assertTrue(self.cli.write_config(
+            {}, changes={'set': {'version': '0.5.0'}}
+        ))
+        self.assertEqual(list(self.config_file.parent.glob('*.tmp')), [])
+
+    def test_corrupt_disk_file_recovers_with_changes(self):
+        """Unreadable disk state: start clean, apply intent, do not crash."""
+        self.config_file.write_text('{not valid json')
+        self.assertTrue(self.cli.write_config(
+            {}, changes={'set': {'version': '0.5.0', 'agents': {}}}
+        ))
+        self.assertEqual(self.read_disk(), {'version': '0.5.0', 'agents': {}})
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

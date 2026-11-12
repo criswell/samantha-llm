@@ -404,7 +404,7 @@ def _merge_chunk_results(chunk_results, session_id: str, log_func):
     return merged
 
 
-def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, workspace: Optional['SessionWorkspace'] = None) -> Optional[dict]:
+def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, workspace: Optional['SessionWorkspace'] = None, basic_analysis: Optional[dict] = None) -> Optional[dict]:
     """
     Process transcript using LLM analysis.
 
@@ -413,6 +413,9 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
         cerebrum_path: Path to cerebrum root
         log_func: Logging function to call
         workspace: Optional SessionWorkspace for session-isolated processing
+        basic_analysis: Optional basic analysis dict (carries session_id from
+            the transcript's session_start event; the terminal recording's
+            script(1) metadata never contains it)
 
     Returns:
         Analysis result dict if successful, None otherwise
@@ -439,8 +442,16 @@ def process_transcript_llm(terminal_data: dict, cerebrum_path: Path, log_func, w
             analyses_dir = recordings_dir.parent / 'analyses'
             analyses_dir.mkdir(exist_ok=True)
 
-        # Get conversation text and agent info
-        session_id = terminal_data.get('metadata', {}).get('session_id', 'unknown')
+        # Get conversation text and agent info.
+        # session_id: the terminal recording's script(1) header never carries
+        # it, so terminal_parser metadata has no session_id key. Fall back to
+        # the transcript's session_start event id (basic_analysis), which the
+        # caller already extracted. Without this, analyzer outputs land in
+        # analysis_unknown*.md and the Phase 3.5 procedural gate (which looks
+        # for analysis_<session_id>_full.md) never fires.
+        session_id = (terminal_data.get('metadata', {}).get('session_id')
+                      or basic_analysis.get('session_id')
+                      or 'unknown')
         agent = terminal_data.get('metadata', {}).get('agent', 'claude')
         conversation_text = terminal_data['raw_text']
         text_size = len(conversation_text)
@@ -799,7 +810,7 @@ def main():
         # Phase 3: LLM processing for pattern detection
         llm_analysis = None
         if terminal_data and HAS_ANALYZER:
-            llm_analysis = process_transcript_llm(terminal_data, cerebrum_path, log_func, workspace)
+            llm_analysis = process_transcript_llm(terminal_data, cerebrum_path, log_func, workspace, basic_analysis=analysis)
             if llm_analysis:
                 log_func(f"[LLM] Found {len(llm_analysis.get('patterns', []))} patterns, {len(llm_analysis.get('decisions', []))} decisions")
             else:

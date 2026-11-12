@@ -252,26 +252,57 @@ MANAGED_CONFIG_KEYS = {
 }
 
 
-def write_config(config):
-    """Write JSON config file, preserving unmanaged top-level keys.
+def write_config(config, changes=None):
+    """Write JSON config, immune to stale in-memory state.
 
-    write_config is called with the in-memory config dict the process read at
-    start. If config.json changed on disk since then (e.g. the user added a
-    `subconscious` section while a samantha-llm session was running), a
-    whole-file overwrite from the stale in-memory state would silently drop
-    those keys. To prevent that, the on-disk file is re-read at write time and
-    every top-level key NOT in MANAGED_CONFIG_KEYS is carried over from disk.
-    Managed keys keep the in-memory values, so caller intent (including
-    deletions) still wins for everything the CLI owns.
+    The 2026-11-12 config-loss incidents (twice in one day) had the same
+    root cause: every samantha-llm process reads config.json into memory
+    once, at startup. Every CLI command that mutates config (auto-link at
+    `start`, exit cleanup, `setup`, persona commands) then wrote that whole
+    in-memory snapshot back. A process started BEFORE a manual config edit
+    (e.g. the user adding the `subconscious` section) and exiting AFTER it
+    rewrote the file from its stale snapshot and silently dropped the edit.
+    The 429af29 mitigation (preserve unmanaged keys from disk at write
+    time) only helps while the key is still on disk; it cannot recover a
+    key an earlier stale write already destroyed.
 
-    Deletion of an unmanaged key: no current call site deletes an unmanaged
-    key (the CLI only ever mutates managed keys), so absent-from-caller is
-    always treated as "stale process" and the disk value is preserved. A
-    future call site that needs to DELETE an unmanaged key must do explicit
-    file surgery rather than rely on write_config.
+    The fix is intent-based merging. `write_config` no longer trusts the
+    caller's dict as a description of the whole file. Instead the caller
+    passes a `changes` dict describing exactly what this command mutated:
+
+    {
+        'set':    {key: value, ...},   # add or replace these top-level keys
+        'delete': [key, ...],          # remove these top-level keys
+    }
+
+    The on-disk file is read at write time, the changes are applied on top
+    of it, and the result is written atomically. A stale snapshot can no
+    longer erase anything it did not knowingly modify, because the write
+    never consults the snapshot for keys not named in `changes`.
+
+    Backward compatibility: callers may still pass a whole config dict
+    with no `changes` argument. In that legacy mode every top-level key
+    the caller's dict mentions is treated as 'set' intent and every
+    managed key absent from it as 'delete' intent; unmanaged keys absent
+    from the caller's dict remain stale-process ambiguity and are
+    preserved from disk (429af29 semantics). New call sites should always
+    pass `changes`.
+
+    Deletion semantics: 'delete' names are explicit intent, so they are
+    removed from the merged result whether managed or not. The exit-
+    cleanup path (auto-linked workspace removal) uses this.
 
     The write is atomic (temp file + rename) so a crash cannot leave a
     truncated config.json behind.
+
+    Args:
+        config: The process's in-memory config dict (kept for signature
+            compatibility and for legacy-mode callers; not used as the
+            merge base when `changes` is provided).
+        changes: Optional intent dict: {'set': {...}, 'delete': [...]}.
+
+    Returns:
+        True on success, False on write failure.
     """
     config_file = get_config_file()
     config_dir = get_config_dir()
@@ -279,21 +310,55 @@ def write_config(config):
     # Create config directory if needed
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    # Merge: preserve unmanaged top-level keys from the on-disk file. The
-    # disk dict is only consulted for keys the caller's dict does not mention
-    # at all, so a stale in-memory config (one written before the user added
-    # an unmanaged section) cannot erase it.
-    merged = dict(config)
+    if changes is None:
+        # Legacy whole-dict mode. Derive intent from the caller's dict:
+        # mentioned keys are 'set', absent managed keys are 'delete',
+        # absent unmanaged keys are ambiguous (stale process) -> preserve.
+        managed_present = {k: config[k] for k in MANAGED_CONFIG_KEYS
+                           if k in config}
+        managed_absent = [k for k in MANAGED_CONFIG_KEYS
+                          if k not in config]
+        changes = {
+            'set': {**config, **managed_present},
+            'delete': managed_absent,
+        }
+        # Keys in `config` that are unmanaged AND absent on disk are new
+        # user-shaped additions from old code paths; treat them as 'set'
+        # (the legacy behavior was to write them).
+        changes['set'] = dict(config)
+        # But unmanaged keys the caller does not know about must survive,
+        # so drop any that exist on disk but not in the caller's dict.
+        try:
+            if config_file.exists():
+                with open(config_file, encoding='utf-8') as f:
+                    on_disk = json.load(f)
+                if isinstance(on_disk, dict):
+                    for key in on_disk:
+                        if key not in config and key not in MANAGED_CONFIG_KEYS:
+                            changes['set'].pop(key, None)
+        except (OSError, ValueError):
+            pass
+
+    set_changes = changes.get('set') or {}
+    delete_changes = changes.get('delete') or []
+
+    # Fresh disk read: the merge base is ALWAYS the current file, never
+    # the caller's snapshot.
+    merged = {}
     try:
         if config_file.exists():
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, encoding='utf-8') as f:
                 on_disk = json.load(f)
             if isinstance(on_disk, dict):
-                for key, value in on_disk.items():
-                    if key not in MANAGED_CONFIG_KEYS and key not in config:
-                        merged[key] = value
+                merged.update(on_disk)
     except (OSError, ValueError):
-        pass  # unreadable disk state: write the caller's dict as-is
+        pass  # unreadable disk state: start from scratch
+
+    # Apply explicit intent
+    for key, value in set_changes.items():
+        merged[key] = value
+    for key in delete_changes:
+        merged.pop(key, None)
 
     # Atomic write: temp file in the same directory, then rename over
     tmp_file = config_file.with_suffix('.json.tmp')
@@ -340,8 +405,8 @@ def migrate_old_config():
             'workspaces': {}
         }
 
-        # Write new config
-        if write_config(new_config):
+        # Write new config (intent-based: fresh-file creation)
+        if write_config(new_config, changes={'set': new_config}):
             # Backup old config
             backup_file = old_config_file.with_suffix('.backup')
             shutil.copy2(old_config_file, backup_file)
@@ -404,7 +469,11 @@ def ensure_config_migrated():
     # Check if migration needed
     if config.get('version', '0.0.0') < '0.5.0':
         config = migrate_to_v050(config)
-        write_config(config)
+        write_config(config, changes={'set': {
+            'personas': config.get('personas', {}),
+            'default_persona': config.get('default_persona', 'samantha-hartwell'),
+            'version': config.get('version', '0.5.0'),
+        }})
 
     return config
 
@@ -465,7 +534,7 @@ def create_config():
         'workspaces': {}
     }
 
-    return write_config(config)
+    return write_config(config, changes={'set': config})
 
 
 def get_personas_dir():
@@ -1573,14 +1642,15 @@ def cmd_link(args):
         print_info(f"Creating symlink: {symlink_path} -> {repo_path}")
         symlink_path.symlink_to(repo_path)
 
-        # Track this workspace as manually linked
-        if 'workspaces' not in config:
-            config['workspaces'] = {}
-        config['workspaces'][str(cwd)] = {
-            'linked_at': datetime.now().isoformat(),
-            'manual': True
-        }
-        write_config(config)
+        # Track this workspace as manually linked (intent-based write:
+        # only workspaces is mutated)
+        write_config(config, changes={'set': {'workspaces': {
+            **config.get('workspaces', {}),
+            str(cwd): {
+                'linked_at': datetime.now().isoformat(),
+                'manual': True
+            },
+        }}})
 
         print()
         print_success("Successfully linked to samantha-llm!")
@@ -1631,11 +1701,11 @@ def cmd_unlink(args):
     try:
         symlink_path.unlink()
 
-        # Remove from workspace tracking
-        config = read_config()
-        if config and 'workspaces' in config and str(cwd) in config['workspaces']:
-            del config['workspaces'][str(cwd)]
-            write_config(config)
+        # Remove from workspace tracking (intent-based write: surgical
+        # delete on the current disk file)
+        disk_config = read_config()
+        if disk_config and 'workspaces' in disk_config and str(cwd) in disk_config['workspaces']:
+            write_config(disk_config, changes={'delete': ['workspaces']})
 
         print()
         print_success("Successfully unlinked!")
@@ -1668,7 +1738,8 @@ def cmd_setup(args):
             return 1
 
         config['default_agent'] = agent_name
-        if write_config(config):
+        # Intent-based write: only default_agent is mutated
+        if write_config(config, changes={'set': {'default_agent': agent_name}}):
             print_success(f"Default agent set to: {agent_name}")
             return 0
         else:
@@ -1769,8 +1840,11 @@ def cmd_setup(args):
         if response in ['', 'y', 'yes']:
             config['default_agent'] = agent_name
 
-    # Save config
-    if write_config(config):
+    # Save config (intent-based write: only the keys this command mutated)
+    setup_changes = {'set': {'agents': config.get('agents', {})}}
+    if 'default_agent' in config:
+        setup_changes['set']['default_agent'] = config['default_agent']
+    if write_config(config, changes=setup_changes):
         print()
         print_success(f"Agent '{agent_name}' configured successfully!")
         print_info(f"  Command: {agent_config['command']}")
@@ -2353,14 +2427,16 @@ def cmd_start(args):
             symlink_path.symlink_to(repo_path)
             auto_linked = True
 
-            # Track as auto-linked workspace
-            if 'workspaces' not in config:
-                config['workspaces'] = {}
-            config['workspaces'][str(cwd)] = {
-                'linked_at': datetime.now().isoformat(),
-                'manual': False
-            }
-            write_config(config)
+            # Track as auto-linked workspace (intent-based write: only the
+            # workspaces key is mutated; anything added to config.json since
+            # this process started is preserved)
+            write_config(config, changes={'set': {'workspaces': {
+                **config.get('workspaces', {}),
+                str(cwd): {
+                    'linked_at': datetime.now().isoformat(),
+                    'manual': False
+                },
+            }}})
 
             print_success("Workspace linked")
         except Exception as e:
@@ -2555,10 +2631,11 @@ def cmd_start(args):
         try:
             if symlink_path.is_symlink():
                 symlink_path.unlink()
-            # Remove from config
+            # Remove from config (intent-based write: the delete is surgical
+            # and applied to the CURRENT disk file, so this stale process
+            # cannot erase unrelated keys added since it started)
             if str(cwd) in config.get('workspaces', {}):
-                del config['workspaces'][str(cwd)]
-                write_config(config)
+                write_config(config, changes={'delete': ['workspaces']})
             print_success("Workspace unlinked")
         except Exception as e:
             print_warning(f"Failed to cleanup workspace: {e}")
@@ -3270,8 +3347,8 @@ def cmd_register_persona(args):
         'registered_at': datetime.now().isoformat()
     }
 
-    # Save config
-    if not write_config(config):
+    # Save config (intent-based write: only personas is mutated)
+    if not write_config(config, changes={'set': {'personas': config.get('personas', {})}}):
         print_error("Failed to save config")
         return 1
 
@@ -3306,7 +3383,8 @@ def cmd_personas(args):
 
         config['default_persona'] = set_default
 
-        if not write_config(config):
+        # Intent-based write: only default_persona is mutated
+        if not write_config(config, changes={'set': {'default_persona': set_default}}):
             print_error("Failed to save config")
             return 1
 
@@ -3401,10 +3479,10 @@ def cmd_unregister_persona(args):
         except Exception as e:
             print_warning(f"Failed to delete file: {e}")
 
-    # Remove from config
+    # Remove from config (intent-based write: surgical delete)
     del config['personas'][name]
 
-    if not write_config(config):
+    if not write_config(config, changes={'set': {'personas': config.get('personas', {})}}):
         print_error("Failed to save config")
         return 1
 

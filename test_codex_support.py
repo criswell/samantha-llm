@@ -57,8 +57,8 @@ class TestCodexSetup(unittest.TestCase):
         }
         written = []
 
-        def write_config(updated):
-            written.append(copy.deepcopy(updated))
+        def write_config(updated, changes=None):
+            written.append(copy.deepcopy(changes if changes is not None else updated))
             return True
 
         with patch.object(cli, 'read_config', return_value=config), \
@@ -68,9 +68,9 @@ class TestCodexSetup(unittest.TestCase):
 
         self.assertEqual(result, 0)
         saved = written[-1]
-        self.assertEqual(saved['default_agent'], 'codex')
-        self.assertEqual(saved['agents']['codex']['command'], 'codex --no-alt-screen')
-        self.assertEqual(saved['agents']['codex']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
+        self.assertEqual(saved['set']['default_agent'], 'codex')
+        self.assertEqual(saved['set']['agents']['codex']['command'], 'codex --no-alt-screen')
+        self.assertEqual(saved['set']['agents']['codex']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
 
     def test_interactive_setup_adds_abacus_agent_using_installed_cli(self):
         cli = load_cli_module()
@@ -82,8 +82,8 @@ class TestCodexSetup(unittest.TestCase):
         }
         written = []
 
-        def write_config(updated):
-            written.append(copy.deepcopy(updated))
+        def write_config(updated, changes=None):
+            written.append(copy.deepcopy(changes if changes is not None else updated))
             return True
 
         with patch.object(cli, 'read_config', return_value=config), \
@@ -92,8 +92,8 @@ class TestCodexSetup(unittest.TestCase):
             result = cli.cmd_setup(SimpleNamespace(default_agent=None))
 
         self.assertEqual(result, 0)
-        self.assertEqual(written[-1]['default_agent'], 'abacus')
-        self.assertEqual(written[-1]['agents']['abacus']['command'], 'abacusai')
+        self.assertEqual(written[-1]['set']['default_agent'], 'abacus')
+        self.assertEqual(written[-1]['set']['agents']['abacus']['command'], 'abacusai')
 
     def test_interactive_setup_adds_qwen3_agent(self):
         cli = load_cli_module()
@@ -105,8 +105,8 @@ class TestCodexSetup(unittest.TestCase):
         }
         written = []
 
-        def write_config(updated):
-            written.append(copy.deepcopy(updated))
+        def write_config(updated, changes=None):
+            written.append(copy.deepcopy(changes if changes is not None else updated))
             return True
 
         with patch.object(cli, 'read_config', return_value=config), \
@@ -116,13 +116,13 @@ class TestCodexSetup(unittest.TestCase):
 
         self.assertEqual(result, 0)
         saved = written[-1]
-        self.assertEqual(saved['default_agent'], 'qwen3')
+        self.assertEqual(saved['set']['default_agent'], 'qwen3')
         self.assertEqual(
-            saved['agents']['qwen3']['command'],
+            saved['set']['agents']['qwen3']['command'],
             'ollama launch qwen --model qwen3-coder:480b-cloud -- --bare'
         )
-        self.assertEqual(saved['agents']['qwen3']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
-        self.assertEqual(saved['agents']['qwen3']['bootstrap_input'], 'qwen_system')
+        self.assertEqual(saved['set']['agents']['qwen3']['bootstrap_file'], 'BOOTSTRAP_PROMPT.md')
+        self.assertEqual(saved['set']['agents']['qwen3']['bootstrap_input'], 'qwen_system')
 
     def test_bootstrap_input_defaults_to_argument_mode(self):
         cli = load_cli_module()
@@ -238,8 +238,8 @@ class TestCodexSetup(unittest.TestCase):
         }
         written = []
 
-        def write_config(updated):
-            written.append(copy.deepcopy(updated))
+        def write_config(updated, changes=None):
+            written.append(copy.deepcopy(changes if changes is not None else updated))
             return True
 
         with patch.object(cli, 'read_config', return_value=config), \
@@ -247,7 +247,7 @@ class TestCodexSetup(unittest.TestCase):
             result = cli.cmd_setup(SimpleNamespace(default_agent='codex'))
 
         self.assertEqual(result, 0)
-        self.assertEqual(written[-1]['default_agent'], 'codex')
+        self.assertEqual(written[-1]['set']['default_agent'], 'codex')
 
     def test_abacus_windows_command_passes_bootstrap_as_initial_message(self):
         cli = load_cli_module()
