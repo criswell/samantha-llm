@@ -5,10 +5,31 @@ Memory file generator for subconscious system.
 Transforms LLM analysis results into cerebrum memory files.
 """
 
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from conversation_analyzer import AnalysisResult
+
+# Characters invalid in Windows filenames: the shared memory repo must stay
+# checkable on Windows clones, and topics flow into both filenames and
+# unquoted YAML frontmatter. Quotes are the known breaker (2026-11-11
+# incident); the full reserved set is stripped preventively.
+_UNSAFE_TOPIC_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Em/en dashes transliterate to plain hyphens (output hygiene rule; also
+# friendlier in filenames than the Unicode codepoints).
+_DASH_TRANSLATION = str.maketrans({
+    '\u2014': '-',  # em dash
+    '\u2013': '-',  # en dash
+    '\u2012': '-',  # figure dash
+    '\u2015': '-',  # horizontal bar
+})
+
+
+def _safe_topic(topic: str) -> str:
+    """Make a topic string safe for filenames and YAML frontmatter."""
+    cleaned = _UNSAFE_TOPIC_CHARS.sub('', topic).translate(_DASH_TRANSLATION)
+    return cleaned.strip('_-. ')
 
 
 def generate_memory_file(
@@ -73,7 +94,8 @@ def generate_memory_file(
 
     # Generate filename from date and first topic
     first_topic = topics[0] if topics else 'session'
-    filename = f"{formatted_date}_{first_topic.replace(' ', '_')}.md"
+    safe_topic = _safe_topic(first_topic) or 'session'
+    filename = f"{formatted_date}_{safe_topic.replace(' ', '_')}.md"
     memory_file = memory_dir / filename
 
     # Write memory file
@@ -103,6 +125,7 @@ def _extract_topics(analysis: AnalysisResult, max_topics: int = 5) -> list:
         # Take first 3-4 words
         topic_words = words.split()[:3]
         topic = '_'.join(topic_words).replace(',', '').replace('.', '')
+        topic = _safe_topic(topic)
         if topic and len(topic) < 30:
             topics.append(topic)
 
@@ -111,6 +134,7 @@ def _extract_topics(analysis: AnalysisResult, max_topics: int = 5) -> list:
         for pattern in analysis.patterns[:2]:
             words = pattern.split()[0:3]
             topic = '_'.join(words).lower().replace(',', '').replace('.', '')
+            topic = _safe_topic(topic)
             if topic and len(topic) < 30 and topic not in topics:
                 topics.append(topic)
 
