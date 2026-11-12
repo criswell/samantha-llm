@@ -4,14 +4,11 @@ This directory contains temporary migration guides for system updates that affec
 
 ## Active Migrations
 
-- **2025-12-03: JSON Index Format** (`2025-12-03_json_indexes.md`)
-  - Status: Active
-  - Migrating from markdown to JSON index format for token efficiency
-  - Delete after all instances complete migration
+None.
 
 ## Completed Migrations
 
-None yet.
+- **2025-12-03: JSON Index Format** - Completed 2026-11-11. The shared memory repo carries one set of JSON indexes read by every instance, so migration is complete by construction. Guide deleted per its own lifecycle note.
 
 ## Guidelines
 
