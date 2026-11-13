@@ -11,6 +11,7 @@ using the analysis output (not raw transcript) as input.
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 
@@ -95,9 +96,38 @@ def _call_llm(prompt_path: Path, analysis_text: str, log_func: Callable) -> str:
     """
     Call LLM to extract procedural patterns.
 
-    Uses Anthropic API (preferred) or Claude CLI (fallback).
-    Uses haiku for cost efficiency — this is a structured extraction task.
+    Priority:
+    1. Config-driven headless analyzer (subconscious.analyzer_agent /
+       headless_commands), same resolution the chunk-analysis path uses, so
+       the extractor works on boxes where the claude CLI ladder 403s
+       (e.g. abacus keystore auth). The analyzer is constructed with the
+       PROCEDURAL prompt, not the chunk-analysis prompt, and its raw
+       (unparsed) stdout is returned.
+    2. Legacy ladder: Anthropic API when ANTHROPIC_API_KEY is set, else
+       the claude CLI.
     """
+    try:
+        import headless_agent_analyzer
+        analyzer, _resolved = headless_agent_analyzer.create_agent_analyzer(prompt_path)
+        if analyzer is not None and hasattr(analyzer, 'run_raw'):
+            log_func(f"[PROCEDURAL] Using config-driven headless agent ({_resolved})")
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(analysis_text)
+                temp_path = f.name
+            try:
+                return analyzer.run_raw(Path(temp_path))
+            finally:
+                Path(temp_path).unlink(missing_ok=True)
+    except RuntimeError as e:
+        # Explicit config requests raise on failure; surface, do not silently
+        # fall through to a ladder that 403s on this box.
+        sub = headless_agent_analyzer.load_subconscious_config()
+        if sub.get('analyzer_agent') not in (None, '', 'auto'):
+            raise
+        log_func(f"[PROCEDURAL] Config-driven analyzer unavailable ({e}); legacy ladder")
+    except Exception:
+        pass
+
     api_key = os.environ.get('ANTHROPIC_API_KEY')
 
     if api_key:
@@ -138,7 +168,6 @@ def _call_anthropic(prompt_path: Path, analysis_text: str, api_key: str, log_fun
 def _call_claude_cli(prompt_path: Path, analysis_text: str, log_func: Callable) -> str:
     """Call Claude CLI for procedural extraction."""
     import subprocess
-    import tempfile
 
     log_func("[PROCEDURAL] Using Claude CLI (fallback)")
 

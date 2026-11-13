@@ -171,6 +171,50 @@ class HeadlessAgentAnalyzer:
 
         return AnalysisParser.parse(result.stdout)
 
+    def run_raw(self, payload_path: Path) -> str:
+        """Run the configured agent headlessly and return the RAW stdout text.
+
+        Unlike analyze(), no prompt prepend logic difference: the prompt is
+        still prepended per spec, but the output is returned unparsed. Used
+        by procedural_extractor, whose LLM output contract is JSON (parsed
+        by its own _parse_output), not the AnalysisResult shape.
+        """
+        prompt_text = self._read(self.prompt_path)
+        payload_text = self._read(payload_path)
+
+        if self.spec.prompt_mode == 'prepend':
+            stdin_text = prompt_text + PROMPT_SEPARATOR + payload_text
+        else:
+            stdin_text = payload_text
+
+        try:
+            result = subprocess.run(
+                self.spec.command,
+                input=stdin_text,
+                capture_output=True,
+                text=True,
+                shell=self.spec.shell,
+                timeout=300,
+                check=True,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"Agent '{self.agent_name}' extraction timed out after 5 minutes"
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"Agent '{self.agent_name}' invocation failed with exit code "
+                f"{e.returncode}\nCommand: {self.spec.command}\n"
+                f"STDERR:\n{e.stderr[:2000]}"
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"Agent '{self.agent_name}' command not found: "
+                f"'{shlex.split(self.spec.command)[0] if self.spec.command else ''}'"
+            )
+
+        return result.stdout
+
 
 def create_agent_analyzer(prompt_path: Path, output_dir: Optional[Path] = None,
                           agent_name: Optional[str] = None,
