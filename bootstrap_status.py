@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import List, Tuple, Optional
 
 try:
-    from session_workspace import SessionWorkspace, get_active_sessions
+    from session_workspace import SessionWorkspace, get_active_sessions, get_failed_sessions
     HAS_WORKSPACE = True
 except ImportError:
     HAS_WORKSPACE = False
@@ -97,8 +97,10 @@ def display_processing_status(cerebrum_path: Path) -> bool:
         return False
 
     active_sessions = get_active_sessions(cerebrum_path)
+    failed_sessions = get_failed_sessions(cerebrum_path) if active_sessions or \
+        (cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'sessions').exists() else []
 
-    if not active_sessions:
+    if not active_sessions and not failed_sessions:
         return False
 
     print("\n⏳ Subconscious Processing Status:")
@@ -106,12 +108,15 @@ def display_processing_status(cerebrum_path: Path) -> bool:
 
     processing = []
     complete_ready = []
+    partial_ready = []
 
     for workspace, status in active_sessions:
         if status['status'] == 'processing':
             processing.append((workspace, status))
         elif status['status'] == 'complete':
             complete_ready.append((workspace, status))
+        elif status['status'] == 'partial':
+            partial_ready.append((workspace, status))
 
     # Show processing sessions
     if processing:
@@ -147,6 +152,28 @@ def display_processing_status(cerebrum_path: Path) -> bool:
 
         print("\n💡 Tip: Run 'merge_sessions.py <cerebrum_path>' to integrate these memories")
 
+    # Show partial sessions (some chunks survived; retry recovers the rest)
+    if partial_ready:
+        print("\n⚠️  PARTIAL - Some chunks failed, NOT mergeable yet:")
+        for workspace, status in partial_ready:
+            print(f"  • Session {workspace.session_id}")
+            print(f"    Chunks:    {status.get('chunks_complete', '?')}/{status.get('chunks_total', '?')} complete, "
+                  f"{status.get('chunks_failed', '?')} failed")
+            print(f"    Hint:      Run 'chunk_retry.py {workspace.session_id} <cerebrum_path>' to recover the rest")
+
+    # Show failed sessions (all chunks lost or hard error)
+    if failed_sessions:
+        print("\n❌ FAILED - No usable analysis, DO NOT MERGE:")
+        for workspace, status in failed_sessions:
+            error = status.get('error', 'unknown error')
+            if len(error) > 100:
+                error = error[:97] + "..."
+            print(f"  • Session {workspace.session_id}")
+            print(f"    Error:     {error}")
+            print(f"    Hint:      Run 'chunk_retry.py {workspace.session_id} <cerebrum_path>' if the failure was transient")
+
+        print("\n💡 Failed sessions stay on disk until retried or removed by hand.")
+
     print("\n" + "=" * 60)
 
     return True
@@ -166,19 +193,30 @@ def get_status_summary(cerebrum_path: Path) -> dict:
         return {'active': False}
 
     active_sessions = get_active_sessions(cerebrum_path)
+    failed_sessions = get_failed_sessions(cerebrum_path)
 
-    if not active_sessions:
+    if not active_sessions and not failed_sessions:
         return {'active': False}
 
     processing_count = sum(1 for _, s in active_sessions if s['status'] == 'processing')
     complete_count = sum(1 for _, s in active_sessions if s['status'] == 'complete')
+    partial_count = sum(1 for _, s in active_sessions if s['status'] == 'partial')
+    failed_count = len(failed_sessions)
 
-    return {
+    summary = {
         'active': True,
         'processing': processing_count,
         'complete': complete_count,
-        'total': len(active_sessions)
+        'partial': partial_count,
+        'failed': failed_count,
+        'total': len(active_sessions) + failed_count
     }
+
+    # Broken sessions block silent memory loss: anything failed or partial is
+    # surfaced as 'needs_attention' so callers can't mistake it for healthy.
+    summary['needs_attention'] = (partial_count + failed_count) > 0
+
+    return summary
 
 
 def main():

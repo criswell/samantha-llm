@@ -117,9 +117,16 @@ def move_memories(cerebrum_path: Path, workspace: SessionWorkspace) -> int:
         for memory_file in workspace.memories_dir.glob('*.md'):
             dest_file = dest_dir / memory_file.name
 
-            # Check for conflicts
+            # Conflict policy: identical content = same memory, skip (the
+            # common finalize-then-merge double-write). Different content =
+            # keep BOTH by suffixing with the session id; overwriting could
+            # destroy distinct memories. Gap fix (2026-11-13): the old code
+            # blindly emitted a suffixed copy even when the on-disk file was
+            # byte-identical, which is what left duplicate session-analysis
+            # shells in short-term memory after the Sept backfill.
             if dest_file.exists():
-                # Rename with session ID
+                if dest_file.read_text() == memory_file.read_text():
+                    continue
                 stem = memory_file.stem
                 dest_file = dest_dir / f"{stem}_{workspace.session_id}.md"
 

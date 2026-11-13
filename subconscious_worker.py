@@ -568,6 +568,23 @@ def finalize_session_memories(session_workspace: 'SessionWorkspace', cerebrum_pa
 
     finalized = []
 
+    # Existing-entry lookup by filename, for update-in-place on re-finalize.
+    # Gap fix (2026-11-13): finalize used to insert a fresh entry per memory
+    # file with no dedup, so reprocessing a session (retry -> re-finalize)
+    # left duplicate index entries. The file copy below is idempotent (same
+    # name overwrites); the index now matches that behavior: one entry per
+    # filename, updated in place.
+    def _existing_entry_for(filename: str) -> Optional[dict]:
+        for section in ('high_importance', 'medium_importance'):
+            entries = index.get('recent', {}).get(section, [])
+            for entry in entries:
+                if entry.get('file') == filename:
+                    return entry
+        for entry in index.get('critical', []):
+            if entry.get('file') == filename:
+                return entry
+        return None
+
     for memory_file in memory_files:
         # Parse frontmatter to get metadata
         content = memory_file.read_text()
@@ -594,7 +611,7 @@ def finalize_session_memories(session_workspace: 'SessionWorkspace', cerebrum_pa
         else:
             frontmatter = {}
 
-        # Copy memory to cerebrum
+        # Copy memory to cerebrum (idempotent: same filename overwrites in place)
         dest_file = cerebrum_memories_dir / memory_file.name
         shutil.copy2(memory_file, dest_file)
         log_func(f"[FINALIZE] Copied {memory_file.name} to cerebrum")
@@ -610,8 +627,13 @@ def finalize_session_memories(session_workspace: 'SessionWorkspace', cerebrum_pa
         mem_type = frontmatter.get('type', 'session-analysis')
         project = frontmatter.get('project', '')
 
-        # Create index entry
-        entry = {
+        # Create index entry (or update the existing one in place)
+        entry = _existing_entry_for(memory_file.name)
+        is_new = entry is None
+        if entry is None:
+            entry = {}
+
+        entry.update({
             'date': date,
             'title': memory_file.stem.replace('_', ' ').title(),
             'topics': topics,
@@ -619,31 +641,51 @@ def finalize_session_memories(session_workspace: 'SessionWorkspace', cerebrum_pa
             'project': project,
             'summary': f"Auto-generated from session {session_workspace.session_id}",
             'file': memory_file.name,
-            'references': 0
-        }
+        })
+        entry.setdefault('references', 0)
 
-        # Add to appropriate section
-        if importance == 'high':
-            index['recent']['high_importance'].insert(0, entry)
+        if is_new:
+            # Add to appropriate section
+            if importance == 'high':
+                index['recent']['high_importance'].insert(0, entry)
+            else:
+                index['recent']['medium_importance'].insert(0, entry)
+
+            # Update stats (new entries only; updates must not double-count)
+            index['stats']['by_importance'][importance] = index['stats']['by_importance'].get(importance, 0) + 1
+            index['stats']['by_type'][mem_type] = index['stats']['by_type'].get(mem_type, 0) + 1
+            if project:
+                index['stats']['by_project'][project] = index['stats']['by_project'].get(project, 0) + 1
         else:
-            index['recent']['medium_importance'].insert(0, entry)
-
-        # Update stats
-        index['stats']['by_importance'][importance] = index['stats']['by_importance'].get(importance, 0) + 1
-        index['stats']['by_type'][mem_type] = index['stats']['by_type'].get(mem_type, 0) + 1
-        if project:
-            index['stats']['by_project'][project] = index['stats']['by_project'].get(project, 0) + 1
+            # An updated entry may have moved importance buckets; reconcile the
+            # section placement so it surfaces correctly.
+            for section in ('high_importance', 'medium_importance'):
+                entries = index['recent'].get(section, [])
+                if entry in entries and \
+                        ((section == 'high_importance') != (importance == 'high')):
+                    entries.remove(entry)
+                    target = 'high_importance' if importance == 'high' else 'medium_importance'
+                    index['recent'][target].insert(0, entry)
+                    break
 
     # Update index metadata
     from datetime import datetime
     index['last_updated'] = datetime.now().strftime('%Y-%m-%d')
-    index['total_memories'] = index.get('total_memories', 0) + len(finalized)
+    # Recompute from the index itself rather than incrementing: re-finalizing an
+    # updated memory must not inflate total_memories (the update-in-place path
+    # above keeps exactly one entry per filename).
+    index['total_memories'] = (
+        len(index.get('critical', []))
+        + len(index.get('recent', {}).get('high_importance', []))
+        + len(index.get('recent', {}).get('medium_importance', []))
+        + len(index.get('high_priority', []))
+    )
 
     # Write updated index
     with open(index_file, 'w') as f:
         json.dump(index, f, indent=2)
 
-    log_func(f"[FINALIZE] Updated index.json with {len(finalized)} new memories")
+    log_func(f"[FINALIZE] Updated index.json with {len(finalized)} memory file(s)")
 
     return finalized
 
@@ -928,14 +970,44 @@ def main():
         transcript_file.rename(processed_file)
         log_func(f"[ARCHIVE] Moved transcript to: {processed_file}")
 
-        # Mark session as complete
+        # Mark session as complete, partial, or failed based on chunk outcomes.
+        # Gap fix (2026-11-13): previously this was mark_complete() unconditionally,
+        # so a session where EVERY chunk failed still reported "complete (awaiting
+        # merge)" and nothing looked broken. That gap hid the Sept 8-21 auth outage
+        # (9 sessions, 530 chunks, zero memories) until the memory loss was noticed
+        # by hand. bootstrap_status.py now surfaces failed/partial sessions loudly.
         if workspace:
-            workspace.mark_complete({
-                'patterns_count': len(llm_analysis.get('patterns', [])) if llm_analysis else 0,
-                'decisions_count': len(llm_analysis.get('decisions', [])) if llm_analysis else 0
-            })
+            counts = workspace.chunk_failure_counts()
+            if counts['total'] == 0:
+                # No manifest (non-LLM path or pre-chunking failure): keep the
+                # legacy behavior; the empty-analysis guard upstream already
+                # prevents empty memories from being written.
+                workspace.mark_complete({
+                    'patterns_count': len(llm_analysis.get('patterns', [])) if llm_analysis else 0,
+                    'decisions_count': len(llm_analysis.get('decisions', [])) if llm_analysis else 0
+                })
+            elif counts['complete'] == counts['total']:
+                workspace.mark_complete({
+                    'patterns_count': len(llm_analysis.get('patterns', [])) if llm_analysis else 0,
+                    'decisions_count': len(llm_analysis.get('decisions', [])) if llm_analysis else 0
+                })
+            elif counts['complete'] > 0:
+                workspace.update_status('partial', {
+                    'chunks_complete': counts['complete'],
+                    'chunks_failed': counts['failed'],
+                    'chunks_total': counts['total'],
+                    'partial_at': datetime.now().isoformat(),
+                    'note': f"Retry with: python3 chunk_retry.py {session_id} <cerebrum_path>"
+                })
+                log_func(f"[PARTIAL] {counts['complete']}/{counts['total']} chunks complete, {counts['failed']} failed; session needs retry before merge")
+            else:
+                workspace.mark_failed(
+                    f"All {counts['total']} chunks failed (0 complete). "
+                    f"Retry with: python3 chunk_retry.py {session_id} <cerebrum_path>"
+                )
+                log_func(f"[FAILED] 0/{counts['total']} chunks succeeded; session marked failed, not mergeable")
 
-        log_func(f"[COMPLETE] Processing complete")
+        log_func(f"[WORKER] Processing finished (status: {workspace.get_status()['status'] if workspace else 'n/a'})")
 
     except Exception as e:
         log_func(f"[ERROR] {str(e)}")

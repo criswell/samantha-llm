@@ -72,13 +72,17 @@ These files define how the memory and operational systems work. Read in this ord
    ```
 
 2. **If unmerged sessions are found:**
-   - You'll see a message like "✅ Complete (Awaiting Merge)"
-   - Inform the user: "I found X unmerged session(s) from previous work. Should I merge them now to access those memories?"
+   - You'll see one of:
+     - "✅ Complete (Awaiting Merge)" - healthy, mergeable
+     - "⚠️ PARTIAL" - some chunks failed; NOT mergeable yet, needs `chunk_retry.py <session_id> <cerebrum_path>` first
+     - "❌ FAILED" - no usable analysis; never merge; retry if the cause was transient
+   - For "Complete (Awaiting Merge)", inform the user: "I found X unmerged session(s) from previous work. Should I merge them now to access those memories?"
    - If user approves, run:
      ```bash
      python3 merge_sessions.py .ai-cerebrum
      ```
    - The memories will be integrated into short-term memory automatically
+   - For PARTIAL/FAILED sessions, surface the retry hint and let Sam decide
 
 3. **If no unmerged sessions:**
    - No action needed, continue with bootstrap
@@ -254,7 +258,12 @@ semantic, but the command still works for basic recall.
   5. Memories are automatically added to `.ai-cerebrum/.ai/short-term-memory/.ai/`
   6. Index.json is updated - new memories appear in next bootstrap
 - **Session isolation** - Each session has its own workspace, supports concurrent sessions
-- **Retry resilience** - Failed chunks automatically retry (handles laptop sleep, API outages)
+- **Retry resilience** - `chunk_retry.py` retries failed chunks (run it manually
+  after laptop sleep or API outages; it works on both live and archived sessions)
+- **Honest status** - Sessions where all chunks failed are marked `failed`
+  (and mostly-failed sessions `partial`) in status.json; `bootstrap_status.py`
+  surfaces them loudly at bootstrap instead of showing a green "complete".
+  Never merge a failed or partial session - retry it first.
 - **What you'll see**: New memories in short-term index from previous sessions, marked with `type: session-analysis`
 - **No manual intervention needed** - System works transparently in background
 

@@ -172,11 +172,24 @@ def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
     import json
     import glob
 
-    workspace = SessionWorkspace(session_id, cerebrum_path)
+    # Look in the live sessions/ directory first, then fall back to the
+    # processed/ archive. Gap fix (2026-11-13): retry_session previously only
+    # looked in sessions/, so once merge_sessions archived a workspace to
+    # processed/<id>, its failed chunks could never be retried in place. The
+    # Sept 21 backfill had to reprocess full transcripts from scratch because
+    # of exactly this blind spot.
+    sessions_base = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'sessions'
+    processed_base = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'processed'
 
-    # Check if session exists
-    if not workspace.root.exists():
-        print(f"ERROR: Session {session_id} not found")
+    if (sessions_base / session_id).exists():
+        workspace = SessionWorkspace(session_id, cerebrum_path, base_dir=sessions_base)
+        archived = False
+    elif (processed_base / session_id).exists():
+        workspace = SessionWorkspace(session_id, cerebrum_path, base_dir=processed_base)
+        archived = True
+        print(f"Note: session {session_id} is archived under processed/; retrying in place.")
+    else:
+        print(f"ERROR: Session {session_id} not found (looked in sessions/ and processed/)")
         return
 
     workspace.log(f"[RETRY] Starting retry process for session {session_id}")
@@ -254,6 +267,8 @@ def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
     if all_complete:
         print("✓ All chunks complete! Session ready for merge.")
         workspace.log("[RETRY] All chunks now complete")
+        if archived:
+            print("  (Session is archived; run merge_sessions.py to re-merge the recovered memories.)")
         # Don't auto-mark as complete - let the merge process do that
     else:
         remaining_failed = len([

@@ -28,19 +28,26 @@ class SessionWorkspace:
             └── processing.log       # Session-specific log
     """
 
-    def __init__(self, session_id: str, cerebrum_path: Path):
+    def __init__(self, session_id: str, cerebrum_path: Path, base_dir: Optional[Path] = None):
         """
         Initialize session workspace.
 
         Args:
             session_id: Unique session identifier (YYYYMMDD_HHMMSS)
             cerebrum_path: Path to cerebrum root
+            base_dir: Optional override for the directory containing session
+                workspaces. Defaults to <cerebrum>/.ai/subconscious/.ai/sessions.
+                chunk_retry passes the processed/ archive here so it can operate
+                on sessions that were already merged and archived.
         """
         self.session_id = session_id
         self.cerebrum_path = cerebrum_path
 
+        if base_dir is None:
+            base_dir = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'sessions'
+
         # Session workspace root
-        self.root = cerebrum_path / '.ai' / 'subconscious' / '.ai' / 'sessions' / session_id
+        self.root = base_dir / session_id
 
         # Subdirectories
         self.analyses_dir = self.root / 'analyses'
@@ -185,6 +192,23 @@ class SessionWorkspace:
             'failed_at': datetime.now().isoformat()
         })
 
+    def chunk_failure_counts(self) -> Dict[str, int]:
+        """
+        Count chunks by status from the manifest.
+
+        Returns:
+            Dict with keys 'complete', 'failed', 'total'. Values are 0 when
+            no manifest exists. Callers use this to decide whether a session
+            genuinely succeeded before calling mark_complete().
+        """
+        manifest = self.get_chunk_manifest()
+        chunks = manifest.get('chunks', {}) if manifest else {}
+
+        complete = sum(1 for c in chunks.values() if c.get('status') == 'complete')
+        failed = sum(1 for c in chunks.values() if c.get('status') == 'failed')
+
+        return {'complete': complete, 'failed': failed, 'total': len(chunks)}
+
 
 def get_session_workspaces(cerebrum_path: Path) -> list:
     """
@@ -211,7 +235,10 @@ def get_session_workspaces(cerebrum_path: Path) -> list:
 
 def get_active_sessions(cerebrum_path: Path) -> list:
     """
-    Get all active (processing or complete but not merged) sessions.
+    Get all sessions that are not terminal-failed: processing, complete, or
+    partial. Partial sessions ride here (not in get_failed_sessions) because
+    they still hold mergeable memories once their failed chunks are retried;
+    get_failed_sessions is reserved for genuinely broken sessions.
 
     Args:
         cerebrum_path: Path to cerebrum root
@@ -224,7 +251,28 @@ def get_active_sessions(cerebrum_path: Path) -> list:
 
     for workspace in workspaces:
         status = workspace.get_status()
-        if status['status'] in ('processing', 'complete'):
+        if status['status'] in ('processing', 'complete', 'partial'):
             active.append((workspace, status))
 
     return active
+
+
+def get_failed_sessions(cerebrum_path: Path) -> list:
+    """
+    Get all sessions marked failed (all chunks lost or hard error).
+
+    Args:
+        cerebrum_path: Path to cerebrum root
+
+    Returns:
+        List of (SessionWorkspace, status_dict) tuples
+    """
+    workspaces = get_session_workspaces(cerebrum_path)
+    failed = []
+
+    for workspace in workspaces:
+        status = workspace.get_status()
+        if status['status'] == 'failed':
+            failed.append((workspace, status))
+
+    return failed
