@@ -112,5 +112,68 @@ class FakeAgentAnalysisTests(unittest.TestCase):
             payload_path.unlink()
 
 
+class RawOutputPersistenceTests(unittest.TestCase):
+    """Regression tests for the 2026-11-12 empty-_full incident.
+
+    HeadlessAgentAnalyzer used to discard result.stdout: the worker's
+    combine step then found no analysis_<sid>_chunkN.md files, wrote
+    analysis_<sid>_full.md as 0 bytes, and procedural extraction (which
+    refuses empty files) never fired for any headless-agent session.
+    """
+
+    def test_raw_output_saved_with_chunk_name(self):
+        """analyze() must persist stdout as analysis_<stem-minus-parsed_>.md."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / 'analyses'
+            payload_path = Path(tmp) / 'parsed_20261112_182418_chunk7.txt'
+            payload_path.write_text('CONVERSATION CHUNK')
+            analyzer = h.HeadlessAgentAnalyzer(
+                Path('/dev/null'), h.HeadlessSpec(command='cat'), agent_name='fake',
+                output_dir=out_dir,
+            )
+            analyzer.analyze(payload_path)
+            expected = out_dir / 'analysis_20261112_182418_chunk7.md'
+            self.assertTrue(expected.exists(), f"missing raw output: {expected}")
+            # 'cat' echoes prompt+payload; the file must contain the payload verbatim
+            self.assertIn('CONVERSATION CHUNK', expected.read_text())
+
+    def test_raw_output_saved_single_pass_name(self):
+        """Single-pass sessions (no _chunkN suffix) get analysis_<sid>.md."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / 'analyses'
+            payload_path = Path(tmp) / 'parsed_20261112_190000.txt'
+            payload_path.write_text('WHOLE CONVERSATION')
+            analyzer = h.HeadlessAgentAnalyzer(
+                Path('/dev/null'), h.HeadlessSpec(command='cat'), agent_name='fake',
+                output_dir=out_dir,
+            )
+            analyzer.analyze(payload_path)
+            expected = out_dir / 'analysis_20261112_190000.md'
+            self.assertTrue(expected.exists(), f"missing raw output: {expected}")
+            self.assertIn('WHOLE CONVERSATION', expected.read_text())
+
+    def test_output_dir_created_on_init(self):
+        """The output dir is created at construction, like the other analyzers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / 'does' / 'not' / 'exist' / 'yet'
+            analyzer = h.HeadlessAgentAnalyzer(
+                Path('/dev/null'), h.HeadlessSpec(command='cat'), agent_name='fake',
+                output_dir=out_dir,
+            )
+            self.assertTrue(out_dir.exists())
+
+    def test_no_output_dir_writes_nothing(self):
+        """output_dir=None (direct CLI use) keeps the old no-persistence behavior."""
+        with tempfile.TemporaryDirectory() as tmp:
+            payload_path = Path(tmp) / 'parsed_x.txt'
+            payload_path.write_text('payload')
+            analyzer = h.HeadlessAgentAnalyzer(
+                Path('/dev/null'), h.HeadlessSpec(command='cat'), agent_name='fake',
+            )
+            analyzer.analyze(payload_path)  # must not raise
+            # nothing was written anywhere: no analysis_ file next to the payload
+            self.assertEqual(list(Path(tmp).glob('analysis_*')), [])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

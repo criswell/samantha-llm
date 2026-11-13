@@ -109,6 +109,8 @@ class HeadlessAgentAnalyzer:
         self.prompt_path = Path(prompt_path)
         self.spec = spec
         self.output_dir = Path(output_dir) if output_dir else None
+        if self.output_dir:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
         self.agent_name = agent_name
 
     def _read(self, path: Path) -> str:
@@ -155,6 +157,17 @@ class HeadlessAgentAnalyzer:
                 f"Agent '{self.agent_name}' command not found: "
                 f"'{shlex.split(self.spec.command)[0] if self.spec.command else ''}'"
             )
+
+        # Save raw output if output directory is configured. Matches the
+        # claude_analyzer/codex_analyzer convention: the caller passes a
+        # parsed file named parsed_<id>.txt (chunked runs: parsed_<sid>_chunkN.txt),
+        # and the raw LLM output lands next to it as analysis_<id>.md. Without
+        # this, the worker's combine step has no chunk files to merge into
+        # analysis_<sid>_full.md (written empty) and procedural extraction
+        # (Phase 3.5) never fires for headless agents.
+        if self.output_dir:
+            output_file = self.output_dir / f'analysis_{recording_path.stem.replace("parsed_", "")}.md'
+            output_file.write_text(result.stdout)
 
         return AnalysisParser.parse(result.stdout)
 
