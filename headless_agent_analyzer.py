@@ -30,12 +30,21 @@ avoided: Linux MAX_ARG_STRLEN caps a single argument at 128 KiB, below the
 150k-char chunk size). `prompt_mode: prepend` places the analysis prompt above
 the payload for CLIs without a system-prompt flag; `none` assumes the CLI
 supplies its own instructions.
+
+Timeout handling: each invocation runs in its own session (start_new_session)
+so a timeout can kill the whole process tree, not just the shell. The default
+cap is 300 seconds; set `subconscious.headless_timeout_seconds` in config.json
+to raise it (minimum 30). The 2026-11-13/14 chunk-retry incident (a hung
+abacusai server connection stalling an unattended retry for hours at a time)
+was the prompt for both: subprocess.run's plain timeout left orphaned pipe
+holders alive, and 300s was tight for the largest chunks.
 """
 
 import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +56,18 @@ DEFAULT_CONFIG_PATH = Path.home() / '.config' / 'samantha-llm' / 'config.json'
 
 PROMPT_SEPARATOR = "\n\n-----\n\nANALYSIS TARGET (parsed conversation) -----\n\n"
 READ_CHUNK = 1024 * 1024
+DEFAULT_TIMEOUT_SECONDS = 300
+
+
+def _resolve_timeout(sub_config: dict) -> int:
+    """Headless timeout in seconds: subconscious.headless_timeout_seconds.
+
+    Minimum 30s; falls back to the 300s default on any bad value.
+    """
+    try:
+        return max(30, int(sub_config.get('headless_timeout_seconds', DEFAULT_TIMEOUT_SECONDS)))
+    except (TypeError, ValueError):
+        return DEFAULT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -101,17 +122,141 @@ def agent_supported(agent_name: str, sub_config: Optional[dict] = None) -> bool:
     return resolve_spec(agent_name, sub) is not None
 
 
+def _fmt_timeout(seconds: int) -> str:
+    """Human-readable timeout: '5 minutes' when even, '45 seconds' otherwise."""
+    if seconds >= 60 and seconds % 60 == 0:
+        minutes = seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    return f"{seconds} seconds"
+
+
+def _run_headless(command: str, stdin_text: str, timeout: int) -> subprocess.CompletedProcess:
+    """Run one headless CLI invocation, killing the whole process group on timeout.
+
+    Two failure modes to defend against, both seen in the 2026-11-13/14 stall:
+
+    1. subprocess.run's timeout kills only the direct child (the shell), leaving
+       CLI-spawned helpers alive holding the stdin pipe. The parent CLI never
+       notices its server is gone and an unattended retry sits for hours
+       (server hangs of 128 and 308 minutes in session 20261113_172955).
+    2. Even with a process-group kill, a grandchild that called setsid() itself
+       (daemonized) escapes the group. So after TimeoutExpired, sweep remaining
+       descendants of the child pid as a fallback.
+
+    We manage Popen directly (rather than subprocess.run) to hold the child's
+    pid for that sweep. The cap is enforced in all paths: communicate() gets
+    the timeout, then killpg, then the descendant sweep, then re-raise.
+    """
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=True,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        # shell=True routes through /bin/sh, so this only fires if the shell
+        # itself is missing; preserve the historical FileNotFoundError contract.
+        raise
+    try:
+        stdout, stderr = proc.communicate(input=stdin_text, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        # Reap; output is irrelevant on the failure path.
+        try:
+            proc.communicate(timeout=10)
+        except Exception:
+            pass
+        raise
+    returncode = proc.returncode
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, command, output=stdout,
+                                            stderr=stderr)
+    return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+
+
+def _kill_process_tree(child_pid: int) -> None:
+    """Kill the child's whole process group, then any surviving descendants.
+
+    The group kill (SIGKILL) handles normal trees; the /proc walk catches
+    daemonized grandchildren that escaped into their own session.
+    """
+    import errno
+    import time as _time
+
+    try:
+        os.killpg(os.getpgid(child_pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+    # Daemonized escapees: walk /proc for descendants of child_pid.
+    deadline = _time.monotonic() + 5
+    while _time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)  # child itself still around?
+        except ProcessLookupError:
+            child_gone = True
+        else:
+            child_gone = False
+        descendants = _descendants_of(child_pid)
+        if child_gone and not descendants:
+            return
+        for pid in descendants:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        _time.sleep(0.2)
+    # Best effort: never block the retry loop past this window.
+
+
+def _descendants_of(root_pid: int) -> list:
+    """Return live pids whose /proc/<pid>/status PPid chain reaches root_pid."""
+    descendants = []
+    try:
+        entries = [p for p in os.listdir('/proc') if p.isdigit()]
+    except OSError:
+        return descendants
+    # Breadth-first over ppid links; /proc order is arbitrary, iterate to fixpoint.
+    known = {root_pid}
+    changed = True
+    while changed:
+        changed = False
+        for entry in entries:
+            pid = int(entry)
+            if pid in known:
+                continue
+            try:
+                with open(f'/proc/{entry}/status', encoding='ascii', errors='replace') as f:
+                    for line in f:
+                        if line.startswith('PPid:'):
+                            ppid = int(line.split()[1])
+                            if ppid in known:
+                                known.add(pid)
+                                descendants.append(pid)
+                                changed = True
+                            break
+            except (OSError, ValueError):
+                continue
+    return descendants
+
+
 class HeadlessAgentAnalyzer:
     """Runs chunk analysis through a configured agent's headless CLI."""
 
     def __init__(self, prompt_path: Path, spec: HeadlessSpec,
-                 output_dir: Optional[Path] = None, agent_name: str = 'headless'):
+                 output_dir: Optional[Path] = None, agent_name: str = 'headless',
+                 timeout: int = DEFAULT_TIMEOUT_SECONDS):
         self.prompt_path = Path(prompt_path)
         self.spec = spec
         self.output_dir = Path(output_dir) if output_dir else None
         if self.output_dir:
             self.output_dir.mkdir(parents=True, exist_ok=True)
         self.agent_name = agent_name
+        self.timeout = timeout
 
     def _read(self, path: Path) -> str:
         with open(path, encoding='utf-8', errors='replace') as f:
@@ -133,18 +278,11 @@ class HeadlessAgentAnalyzer:
             stdin_text = payload_text
 
         try:
-            result = subprocess.run(
-                self.spec.command,
-                input=stdin_text,
-                capture_output=True,
-                text=True,
-                shell=self.spec.shell,
-                timeout=300,
-                check=True,
-            )
+            result = _run_headless(self.spec.command, stdin_text, self.timeout)
         except subprocess.TimeoutExpired:
             raise RuntimeError(
-                f"Agent '{self.agent_name}' analysis timed out after 5 minutes"
+                f"Agent '{self.agent_name}' analysis timed out after "
+                f"{_fmt_timeout(self.timeout)}"
             )
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
@@ -188,18 +326,11 @@ class HeadlessAgentAnalyzer:
             stdin_text = payload_text
 
         try:
-            result = subprocess.run(
-                self.spec.command,
-                input=stdin_text,
-                capture_output=True,
-                text=True,
-                shell=self.spec.shell,
-                timeout=300,
-                check=True,
-            )
+            result = _run_headless(self.spec.command, stdin_text, self.timeout)
         except subprocess.TimeoutExpired:
             raise RuntimeError(
-                f"Agent '{self.agent_name}' extraction timed out after 5 minutes"
+                f"Agent '{self.agent_name}' extraction timed out after "
+                f"{_fmt_timeout(self.timeout)}"
             )
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
@@ -282,4 +413,5 @@ def create_agent_analyzer(prompt_path: Path, output_dir: Optional[Path] = None,
         return None, None
 
     return HeadlessAgentAnalyzer(prompt_path, spec, output_dir=output_dir,
-                                 agent_name=name), name
+                                 agent_name=name,
+                                 timeout=_resolve_timeout(sub)), name

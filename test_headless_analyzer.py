@@ -7,8 +7,10 @@ claude/codex names, and end-to-end analysis through a fake stdin agent.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -82,12 +84,17 @@ class FakeAgentAnalysisTests(unittest.TestCase):
         """The analysis prompt must reach the agent above the payload."""
         seen = {}
 
-        def fake_run(command, **kwargs):
-            seen['input'] = kwargs.get('input', '')
-            result = unittest.mock.Mock()
-            result.stdout = 'no analysis content'
-            result.returncode = 0
-            return result
+        class FakeProc:
+            returncode = 0
+            pid = 0
+
+            def communicate(self, input=None, timeout=None):
+                seen['input'] = input
+                return ('no analysis content', '')
+
+        def fake_popen(command, **kwargs):
+            seen['command'] = command
+            return FakeProc()
 
         with tempfile.NamedTemporaryFile('w', delete=False) as pf:
             pf.write('SYSTEM PROMPT TEXT')
@@ -99,7 +106,7 @@ class FakeAgentAnalysisTests(unittest.TestCase):
             analyzer = h.HeadlessAgentAnalyzer(
                 prompt_path, h.HeadlessSpec(command='fake-agent'), agent_name='fake'
             )
-            with mock.patch.object(h.subprocess, 'run', side_effect=fake_run):
+            with mock.patch.object(h.subprocess, 'Popen', side_effect=fake_popen):
                 analyzer.analyze(payload_path)
             self.assertIn('SYSTEM PROMPT TEXT', seen['input'])
             self.assertIn('CONVERSATION BODY', seen['input'])
@@ -107,6 +114,7 @@ class FakeAgentAnalysisTests(unittest.TestCase):
                 seen['input'].index('SYSTEM PROMPT TEXT'),
                 seen['input'].index('CONVERSATION BODY'),
             )
+            self.assertEqual(seen['command'], 'fake-agent')
         finally:
             prompt_path.unlink()
             payload_path.unlink()
@@ -173,6 +181,85 @@ class RawOutputPersistenceTests(unittest.TestCase):
             analyzer.analyze(payload_path)  # must not raise
             # nothing was written anywhere: no analysis_ file next to the payload
             self.assertEqual(list(Path(tmp).glob('analysis_*')), [])
+
+
+class TimeoutBehaviorTests(unittest.TestCase):
+    """Regression tests for the 2026-11-13/14 chunk-retry stall.
+
+    subprocess.run's timeout killed only the direct child (the shell), leaving
+    CLI-spawned helpers alive with the stdin pipe held open. An unattended
+    chunk_retry then sat for hours (server hangs of 128 and 308 minutes in the
+    session 20261113_172955 log) instead of failing at the 5-minute cap.
+    """
+
+    def test_timeout_kills_whole_process_tree(self):
+        """A timed-out invocation must not leave the command tree running."""
+        analyzer = h.HeadlessAgentAnalyzer(
+            Path('/dev/null'),
+            # Child daemonizes a grandchild that inherits stdin and sleeps long.
+            h.HeadlessSpec(command='sleep 30 & sleep 300'),
+            agent_name='fake',
+            timeout=2,
+        )
+        with tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False) as f:
+            f.write('payload')
+            path = Path(f.name)
+        marker = f'htk_{os.getpid()}'  # identifiable, not matched by unrelated procs
+        try:
+            with mock.patch.object(h, 'DEFAULT_TIMEOUT_SECONDS', 2):
+                start = time.monotonic()
+                with self.assertRaises(RuntimeError) as ctx:
+                    analyzer.analyze(path)
+                elapsed = time.monotonic() - start
+            self.assertIn('timed out', str(ctx.exception))
+            # The 2s cap must actually be enforced (was: unbounded stall).
+            self.assertLess(elapsed, 20)
+            # Give any survivor a moment to show up, then require none.
+            time.sleep(0.3)
+            survivors = subprocess.run(
+                ['pgrep', '-f', 'sleep 300'], capture_output=True, text=True
+            ).stdout.strip()
+            self.assertEqual(survivors, '', 'orphaned grandchild survived the timeout')
+        finally:
+            path.unlink()
+
+    def test_timeout_error_mentions_configured_seconds(self):
+        analyzer = h.HeadlessAgentAnalyzer(
+            Path('/dev/null'), h.HeadlessSpec(command='sleep 300'),
+            agent_name='fake', timeout=120,
+        )
+        with tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False) as f:
+            f.write('payload')
+            path = Path(f.name)
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                analyzer.analyze(path)
+            self.assertIn('timed out after 2 minutes', str(ctx.exception))
+        finally:
+            path.unlink()
+
+    def test_fmt_timeout_shapes(self):
+        self.assertEqual(h._fmt_timeout(300), '5 minutes')
+        self.assertEqual(h._fmt_timeout(60), '1 minute')
+        self.assertEqual(h._fmt_timeout(120), '2 minutes')
+        self.assertEqual(h._fmt_timeout(45), '45 seconds')
+
+    def test_resolve_timeout_from_config(self):
+        self.assertEqual(h._resolve_timeout({'headless_timeout_seconds': 600}), 600)
+        self.assertEqual(h._resolve_timeout({}), h.DEFAULT_TIMEOUT_SECONDS)
+        self.assertEqual(h._resolve_timeout({'headless_timeout_seconds': 'junk'}),
+                         h.DEFAULT_TIMEOUT_SECONDS)
+        self.assertEqual(h._resolve_timeout({'headless_timeout_seconds': 5}), 30)  # floor
+
+    def test_create_agent_analyzer_applies_config_timeout(self):
+        with mock.patch.object(h, 'load_subconscious_config', return_value={
+            'analyzer_agent': 'fake',
+            'headless_commands': {'fake': {'command': 'cat'}},
+            'headless_timeout_seconds': 777,
+        }), mock.patch.object(h.shutil, 'which', return_value='/usr/bin/cat'):
+            analyzer, name = h.create_agent_analyzer(Path('/dev/null'))
+        self.assertEqual(name, 'fake')
+        self.assertEqual(analyzer.timeout, 777)
 
 
 if __name__ == '__main__':
