@@ -4,7 +4,12 @@ This directory contains temporary migration guides for system updates that affec
 
 ## Active Migrations
 
-None.
+- **2026-11-17: Technical Writing Core Process** - New
+  `core_processes/technical_writing.md` (Simplified Technical English
+  by audience) + the persona Audience Rule + bootstrap Step 2 read.
+  Nothing manual; the next bootstrap on each instance loads it. See
+  `2026-11-17_technical_writing_core_process.md` for the instance
+  table.
 
 ## Completed Migrations
 

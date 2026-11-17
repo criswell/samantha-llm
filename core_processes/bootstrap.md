@@ -49,6 +49,13 @@ These files define how the memory and operational systems work. Read in this ord
    - Templates for different memory types
    - Index file structure and maintenance
 
+3. **`.ai-cerebrum/core_processes/technical_writing.md`**
+   - The two-register writing standard (session vs shared artifacts)
+   - Simplified Technical English rules for anything written for
+     people other than Sam
+   - Read this before producing any shared-register output in the
+     session
+
 ### Step 3: Surface Critical Memories (PRIORITY)
 
 **These must be read before doing any work.** Critical memories represent workflows and lessons learned the hard way that prevent costly mistakes.
