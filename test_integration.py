@@ -283,6 +283,40 @@ class TestBootstrapStatusFailureSurfacing(unittest.TestCase):
         self.assertIn('PARTIAL', output)
         self.assertIn('3/5 complete', output)
 
+    def test_stale_partial_stamp_promoted_to_complete(self):
+        """A 'partial' stamp whose manifest is all-complete is mergeable.
+
+        chunk_retry can recover the last chunks and die before re-stamping
+        (or an operator fixes chunks by hand); status.json counters go stale.
+        The manifest is the source of truth: such a session must show under
+        Complete (Awaiting Merge), not keep shouting PARTIAL forever - the
+        exact state session 20261115_114055 sat in for a day.
+        """
+        import io
+        import contextlib
+        from bootstrap_status import display_processing_status, get_status_summary
+
+        stale = SessionWorkspace('20260205_120000', self.cerebrum_path)
+        stale.create()
+        stale.init_chunk_manifest(3)
+        for n in (1, 2, 3):
+            stale.update_chunk_status(n, 'complete')
+        stale.update_status('partial', {
+            'chunks_complete': 1, 'chunks_failed': 0, 'chunks_total': 3
+        })
+
+        summary = get_status_summary(self.cerebrum_path)
+        self.assertFalse(summary['needs_attention'], summary)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            display_processing_status(self.cerebrum_path)
+        output = buf.getvalue()
+        self.assertIn('Awaiting Merge', output)
+        self.assertNotIn('PARTIAL', output)
+        # The reconciliation is explained, not silent.
+        self.assertIn('manifest', output.lower())
+
     def test_no_sessions_returns_false(self):
         """No sessions of any status: display returns False (healthy)."""
         from bootstrap_status import display_processing_status

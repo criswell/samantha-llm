@@ -109,6 +109,7 @@ def display_processing_status(cerebrum_path: Path) -> bool:
     processing = []
     complete_ready = []
     partial_ready = []
+    stale_stamps = []  # manifest all-complete, status.json still 'partial'
 
     for workspace, status in active_sessions:
         if status['status'] == 'processing':
@@ -116,7 +117,17 @@ def display_processing_status(cerebrum_path: Path) -> bool:
         elif status['status'] == 'complete':
             complete_ready.append((workspace, status))
         elif status['status'] == 'partial':
-            partial_ready.append((workspace, status))
+            # Reconcile the stamp against the live chunk manifest: status.json
+            # counters go stale when chunk_retry recovers the last chunks but
+            # dies before re-stamping, or when chunks are fixed by hand. The
+            # manifest is the source of truth (2026-11-13 rule); a stamp that
+            # contradicts it must not leave a finished session un-mergeable.
+            complete, failed, total = get_chunk_progress(workspace)
+            if total > 0 and complete == total:
+                stale_stamps.append(workspace.session_id)
+                complete_ready.append((workspace, status))
+            else:
+                partial_ready.append((workspace, status))
 
     # Show processing sessions
     if processing:
@@ -149,7 +160,9 @@ def display_processing_status(cerebrum_path: Path) -> bool:
             completed_at = status.get('completed_at', 'unknown')
             print(f"  • Session {workspace.session_id}")
             print(f"    Completed: {completed_at}")
-
+            if workspace.session_id in stale_stamps:
+                print("    Note:      status.json still says 'partial' but the chunk manifest "
+                      "shows all chunks complete; re-run chunk_retry or merge_sessions.py")
         print("\n💡 Tip: Run 'merge_sessions.py <cerebrum_path>' to integrate these memories")
 
     # Show partial sessions (some chunks survived; retry recovers the rest)
@@ -201,6 +214,18 @@ def get_status_summary(cerebrum_path: Path) -> dict:
     processing_count = sum(1 for _, s in active_sessions if s['status'] == 'processing')
     complete_count = sum(1 for _, s in active_sessions if s['status'] == 'complete')
     partial_count = sum(1 for _, s in active_sessions if s['status'] == 'partial')
+
+    # Stale 'partial' stamps whose manifests are all-complete (reconciled in
+    # display_processing_status, which promoted them to complete-ready) don't
+    # need attention: the manifest says the chunks are done.
+    needs_attention_actives = 0
+    for ws, s in active_sessions:
+        if s['status'] != 'partial':
+            continue
+        complete, failed, total = get_chunk_progress(ws)
+        if not (total > 0 and complete == total):
+            needs_attention_actives += 1
+
     failed_count = len(failed_sessions)
 
     summary = {
@@ -214,7 +239,9 @@ def get_status_summary(cerebrum_path: Path) -> dict:
 
     # Broken sessions block silent memory loss: anything failed or partial is
     # surfaced as 'needs_attention' so callers can't mistake it for healthy.
-    summary['needs_attention'] = (partial_count + failed_count) > 0
+    # Stale 'partial' stamps with all-complete manifests don't count (they are
+    # mergeable; the reconciled view above already says so).
+    summary['needs_attention'] = (needs_attention_actives + failed_count) > 0
 
     return summary
 

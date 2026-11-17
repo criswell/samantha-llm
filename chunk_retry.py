@@ -169,6 +169,118 @@ def retry_chunk(
         return False
 
 
+def recombine_session_analyses(workspace, archived: bool):
+    """Rebuild analysis_<sid>_full.md and _parsed.md from all chunk analyses.
+
+    The worker's main analysis loop only combines chunk outputs when it
+    finishes with a terminal state, so a session recovered by chunk_retry
+    keeps stale combined files built from the pre-retry chunk subset (seen
+    twice: sessions 20261113_172955 and 20261115_114055). This mechanically
+    recomines what the worker would have written:
+    - _full.md: every chunk's raw analysis under a '# Chunk N/total' header,
+      joined by '---' separators (same format as the worker's combine step).
+    - _parsed.md: each chunk parsed via the production AnalysisParser, merged
+      with the same dedupe logic as _merge_chunk_results, rendered via
+      AnalysisResult.to_markdown().
+    """
+    session_id = workspace.session_id
+    analyses_dir = workspace.analyses_dir
+    chunk_files = sorted(
+        analyses_dir.glob(f'analysis_{session_id}_chunk*.md'),
+        key=lambda p: int(p.stem.rsplit('chunk', 1)[1])
+    )
+    if not chunk_files:
+        workspace.log("[RETRY] No chunk analyses found; skipping recombine")
+        return
+
+    total = len(chunk_files)
+
+    # _full.md: raw section combine (worker's format)
+    sections = []
+    for i, chunk_file in enumerate(chunk_files, 1):
+        sections.append(f"# Chunk {i}/{total}\n\n{chunk_file.read_text()}")
+    full_file = analyses_dir / f'analysis_{session_id}_full.md'
+    full_file.write_text("\n\n---\n\n".join(sections))
+    workspace.log(f"[RETRY] Rebuilt {full_file.name} from {total} chunk analyses")
+
+    # _parsed.md: parse + merge (same logic as subconscious_worker._merge_chunk_results)
+    from conversation_analyzer import AnalysisParser, AnalysisResult
+
+    results = [AnalysisParser.parse(f.read_text()) for f in chunk_files]
+
+    def dedupe_list(items):
+        seen = set()
+        out = []
+        for item in items:
+            normalized = item.lower().strip()
+            if normalized not in seen:
+                seen.add(normalized)
+                out.append(item)
+        return out
+
+    all_p, all_d, all_t, all_pr, all_l, summaries = [], [], [], [], [], []
+    for i, r in enumerate(results, 1):
+        all_p.extend(r.patterns)
+        all_d.extend(r.decisions)
+        all_t.extend(r.todos)
+        all_pr.extend(r.preferences)
+        all_l.extend(r.learnings)
+        if r.summary:
+            s = r.summary.strip()
+            if len(s) > 500:
+                s = s[:497] + '...'
+            summaries.append(f"**Chunk {i}**: {s}")
+
+    merged = AnalysisResult(
+        patterns=dedupe_list(all_p),
+        decisions=dedupe_list(all_d),
+        todos=dedupe_list(all_t),
+        preferences=dedupe_list(all_pr),
+        learnings=dedupe_list(all_l),
+        summary='\n\n'.join(summaries) if summaries else None,
+    )
+    parsed_file = analyses_dir / f'analysis_{session_id}_parsed.md'
+    parsed_file.write_text(merged.to_markdown())
+    workspace.log(
+        f"[RETRY] Rebuilt {parsed_file.name} from {total} chunk analyses: "
+        f"{len(merged.patterns)} patterns, {len(merged.decisions)} decisions, "
+        f"{len(merged.todos)} TODOs"
+    )
+
+
+def restamp_session_complete(workspace):
+    """Re-stamp session status to complete after full chunk recovery.
+
+    The worker's main loop stamps terminal status only when IT finishes, so a
+    session whose last chunks were recovered by chunk_retry stays 'partial'
+    forever: merge_sessions.py skips it (only merges status=='complete') while
+    bootstrap_status.py keeps shouting PARTIAL with stale counters. Once the
+    manifest is all-complete, this re-stamp closes that loop.
+    """
+    counts = workspace.chunk_failure_counts()
+    if counts['complete'] != counts['total'] or counts['total'] == 0:
+        workspace.log(
+            f"[RETRY] Skipping re-stamp: manifest shows {counts['complete']}/{counts['total']} complete"
+        )
+        return False
+
+    from datetime import datetime
+    status = workspace.get_status()
+    workspace.mark_complete({
+        'chunks_complete': counts['complete'],
+        'chunks_failed': counts['failed'],
+        'chunks_total': counts['total'],
+        'recovered_by': 'chunk_retry',
+        'note': 'All chunks complete after retry; status re-stamped complete post-recovery. '
+                'Combined analysis files rebuilt from all chunk analyses.',
+    })
+    workspace.log(
+        f"[RETRY] Re-stamped status '{status.get('status')}' -> 'complete' "
+        f"({counts['complete']}/{counts['total']} chunks)"
+    )
+    return True
+
+
 def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
     """
     Retry all failed chunks in a session with exponential backoff.
@@ -284,9 +396,12 @@ def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
     if all_complete:
         print("✓ All chunks complete! Session ready for merge.")
         workspace.log("[RETRY] All chunks now complete")
+        recombine_session_analyses(workspace, archived)
+        restamp_session_complete(workspace)
         if archived:
             print("  (Session is archived; run merge_sessions.py to re-merge the recovered memories.)")
-        # Don't auto-mark as complete - let the merge process do that
+        else:
+            print("  Session re-stamped complete; run merge_sessions.py to integrate the memories.")
     else:
         remaining_failed = len([
             c for c in manifest['chunks'].values()
