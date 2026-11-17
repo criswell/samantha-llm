@@ -13,6 +13,15 @@ from datetime import datetime
 from typing import Optional
 import importlib.util
 
+# Suspend guard module (Linux/systemd only). The actual re-exec happens at
+# retry_session() entry, so an in-process CLI call is not exec-replaced at
+# import time. Failure to import is non-fatal: log and continue unprotected.
+try:
+    import suspend_inhibit
+except Exception:  # pragma: no cover - guard must never block retries
+    suspend_inhibit = None
+    print("[INHIBIT] WARN: suspend guard unavailable; continuing unprotected")
+
 # Import session workspace
 try:
     from session_workspace import SessionWorkspace
@@ -171,6 +180,14 @@ def retry_session(session_id: str, cerebrum_path: Path, max_retries: int = 3):
     """
     import json
     import glob
+
+    # Suspend guard: re-exec under systemd-inhibit (Linux/systemd only) before
+    # any chunk work. Standalone runs re-exec as this script; in-process CLI
+    # calls re-exec the CLI into the same command (args re-parse, env guard
+    # prevents loops) and land here again, now inhibited. A batch that can be
+    # suspended is strictly better than a batch that never runs.
+    if suspend_inhibit is not None:
+        suspend_inhibit.inhibit_exec(log=print)
 
     # Look in the live sessions/ directory first, then fall back to the
     # processed/ archive. Gap fix (2026-11-13): retry_session previously only

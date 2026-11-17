@@ -795,6 +795,16 @@ def main():
     transcript_file = Path(sys.argv[1])
     cerebrum_path = Path(sys.argv[2])
 
+    # Suspend guard: re-exec under systemd-inhibit on Linux/systemd so logind
+    # cannot suspend the box or act on the lid switch mid-analysis. Must run
+    # before any chunk work so the inhibitor is registered before the first
+    # LLM call. No-op on non-Linux; exec failure continues uninhibited.
+    try:
+        import suspend_inhibit
+        suspend_inhibit.inhibit_exec(log=print)
+    except Exception as inhibit_err:  # pragma: no cover - guard must never block analysis
+        print(f"[INHIBIT] WARN: suspend guard unavailable ({inhibit_err}); continuing unprotected")
+
     # Extract session ID from transcript filename
     import re
     match = re.search(r'transcript_(\d{8}_\d{6})', transcript_file.name)

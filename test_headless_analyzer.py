@@ -194,6 +194,17 @@ class TimeoutBehaviorTests(unittest.TestCase):
 
     def test_timeout_kills_whole_process_tree(self):
         """A timed-out invocation must not leave the command tree running."""
+        # Snapshot /proc NOW: any 'sleep 300' process started after this point
+        # (by start time) is this test's tree, even if re-parented when killed.
+        # A bare `pgrep -f sleep 300` is a false premise on a multitasking
+        # box: it matches strays from earlier crashed runs and other trees
+        # whose cmdline merely contains the string (the sh -c wrapper among
+        # them) - the source of the 2026-11-16 suite flake.
+        def start_ticks(pid):
+            with open(f'/proc/{pid}/stat', encoding='ascii', errors='replace') as f:
+                return int(f.read().rsplit(') ', 1)[1].split()[19])
+
+        before = start_ticks(os.getpid())
         analyzer = h.HeadlessAgentAnalyzer(
             Path('/dev/null'),
             # Child daemonizes a grandchild that inherits stdin and sleeps long.
@@ -204,7 +215,6 @@ class TimeoutBehaviorTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False) as f:
             f.write('payload')
             path = Path(f.name)
-        marker = f'htk_{os.getpid()}'  # identifiable, not matched by unrelated procs
         try:
             with mock.patch.object(h, 'DEFAULT_TIMEOUT_SECONDS', 2):
                 start = time.monotonic()
@@ -214,12 +224,27 @@ class TimeoutBehaviorTests(unittest.TestCase):
             self.assertIn('timed out', str(ctx.exception))
             # The 2s cap must actually be enforced (was: unbounded stall).
             self.assertLess(elapsed, 20)
-            # Give any survivor a moment to show up, then require none.
+            # Give any survivor a moment to show up, then require none among
+            # processes started during this test. A SIGKILLed process that is
+            # dead but not yet reaped (Z state) is not an escapee; only live
+            # state counts.
             time.sleep(0.3)
-            survivors = subprocess.run(
+            pgrep = subprocess.run(
                 ['pgrep', '-f', 'sleep 300'], capture_output=True, text=True
-            ).stdout.strip()
-            self.assertEqual(survivors, '', 'orphaned grandchild survived the timeout')
+            )
+            survivors = []
+            for pid in pgrep.stdout.split():
+                try:
+                    fields = open(f'/proc/{pid}/stat',
+                                  encoding='ascii', errors='replace').read().rsplit(') ', 1)[1].split()
+                    state, started = fields[2], int(fields[19])
+                except (FileNotFoundError, IndexError, ValueError):
+                    continue  # vanished between pgrep and stat: was dying
+                if state != 'Z' and started >= before:
+                    survivors.append(f'{pid}:{state}')
+            self.assertEqual(
+                survivors, [],
+                'orphaned grandchild survived the timeout')
         finally:
             path.unlink()
 
