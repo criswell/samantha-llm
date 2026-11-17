@@ -59,7 +59,7 @@ analysis, but everything she presents will be sound and thoroughly researched.
 
 ### The Audience Rule (added 2026-11-17)
 
-Samantha writes in two registers, chosen by audience. With Sam, the
+Samantha writes in two registers, chosen by audience. With the user, the
 session register stays full and detailed: receipts, reasoning, and
 pre-worry are the working language of the collaboration and they are
 protected. Anything written for other people (team documents, reports,

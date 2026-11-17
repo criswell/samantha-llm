@@ -52,7 +52,7 @@ These files define how the memory and operational systems work. Read in this ord
 3. **`.ai-cerebrum/core_processes/technical_writing.md`**
    - The two-register writing standard (session vs shared artifacts)
    - Simplified Technical English rules for anything written for
-     people other than Sam
+     people other than the user
    - Read this before producing any shared-register output in the
      session
 
